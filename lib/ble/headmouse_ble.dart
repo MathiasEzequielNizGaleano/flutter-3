@@ -255,14 +255,18 @@ class HeadMouseBle extends ChangeNotifier {
       // dispositivo deja de anunciarse: lo agregamos igual a la lista.
       if (!kIsWeb) {
         try {
+          // En Android el filtro por servicio se ignora y vuelven todos los
+          // equipos BLE conectados (relojes, auriculares...): se filtra por
+          // nombre, igual que en el escaneo.
           final devices = await FlutterBluePlus.systemDevices([_serviceGuid]);
           _systemFound = [
             for (final d in devices)
-              HeadMouseFound(
-                device: d,
-                name: _nameOf(d),
-                alreadyConnected: true,
-              ),
+              if (_hasHeadMouseName(d.platformName))
+                HeadMouseFound(
+                  device: d,
+                  name: _nameOf(d),
+                  alreadyConnected: true,
+                ),
           ];
           _found = _systemFound;
           notifyListeners();
@@ -326,10 +330,16 @@ class HeadMouseBle extends ChangeNotifier {
 
   static bool _isHeadMouse(ScanResult r) {
     if (r.advertisementData.serviceUuids.contains(_serviceGuid)) return true;
-    final name = '${r.advertisementData.advName} ${r.device.platformName}'
-        .toLowerCase();
-    return name.contains('headmouse');
+    return _hasHeadMouseName(
+      '${r.advertisementData.advName} ${r.device.platformName}',
+    );
   }
+
+  static bool _hasHeadMouseName(String name) =>
+      name.toLowerCase().contains('headmouse');
+
+  static BluetoothService? _configService(List<BluetoothService> services) =>
+      services.firstWhereOrNull((s) => s.serviceUuid == _serviceGuid);
 
   static String _nameOf(BluetoothDevice d) {
     if (d.advName.isNotEmpty) return d.advName;
@@ -375,10 +385,16 @@ class HeadMouseBle extends ChangeNotifier {
   }
 
   Future<void> _setupGatt(BluetoothDevice device) async {
-    final services = await device.discoverServices();
-    final service = services.firstWhereOrNull(
-      (s) => s.serviceUuid == _serviceGuid,
-    );
+    var service = _configService(await device.discoverServices());
+    if (service == null &&
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      // Android recuerda la tabla GATT de los equipos vinculados: si el ESP32
+      // se reprogramó después de vincularlo, sigue viendo los servicios del
+      // firmware anterior. Se borra esa copia y se vuelve a leer.
+      await device.clearGattCache();
+      service = _configService(await device.discoverServices());
+    }
     if (service == null) {
       throw const HeadMouseException(
         'Ese dispositivo no tiene el servicio de configuración del '
