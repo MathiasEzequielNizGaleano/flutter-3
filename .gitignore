@@ -46,3 +46,5 @@ app.*.map.json
 
 # Dev files
 /docs
+# Logs del CLI de Firebase
+firebase-debug.log

@@ -5,13 +5,17 @@ import 'package:headmouse_pro/theme/app_text_styles.dart';
 class BatteryRing extends StatelessWidget {
   const BatteryRing({super.key, required this.batteryLevel});
 
-  final double batteryLevel;
+  /// De 0 a 1. Null cuando todavía no se recibió ninguna lectura.
+  final double? batteryLevel;
 
   @override
   Widget build(BuildContext context) {
-    final percent = (batteryLevel * 100).toStringAsFixed(0);
+    final level = batteryLevel;
+    final percent = level == null ? '—' : '${(level * 100).round()}%';
     return Semantics(
-      label: 'Batería del dispositivo: $percent por ciento',
+      label: level == null
+          ? 'Batería del dispositivo: sin datos'
+          : 'Batería del dispositivo: ${(level * 100).round()} por ciento',
       excludeSemantics: true,
       child: Stack(
         alignment: Alignment.center,
@@ -20,19 +24,20 @@ class BatteryRing extends StatelessWidget {
             width: 120,
             height: 120,
             child: CircularProgressIndicator(
-              value: batteryLevel,
+              value: level ?? 0,
               strokeWidth: 8,
               backgroundColor: AppColors.line,
-              valueColor: AlwaysStoppedAnimation<Color>(AppColors.cyan),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                level != null && level <= 0.2
+                    ? AppColors.coral
+                    : AppColors.cyan,
+              ),
             ),
           ),
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '${(batteryLevel * 100).toStringAsFixed(0)}%',
-                style: AppTextStyles.display(fontSize: 22),
-              ),
+              Text(percent, style: AppTextStyles.display(fontSize: 22)),
               Text(
                 'Batería',
                 style: AppTextStyles.body(

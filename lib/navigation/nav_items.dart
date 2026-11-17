@@ -15,67 +15,85 @@ import '../screens/patient_caregivers_screen.dart';
 import '../screens/patient_history_screen.dart';
 import '../screens/patient_home_screen.dart';
 import '../screens/patient_profile_screen.dart';
+import '../services/auth_service.dart';
 import '../widgets/app_bottom_nav.dart';
 
-List<AppNavItem> patientHomeNavItems() => [
-  AppNavItem(
-    icon: Icons.home,
-    label: 'Inicio',
-    builder: (_) => const PatientHomeScreen(),
-  ),
-  AppNavItem(
-    icon: Icons.devices,
-    label: 'Dispositivo',
-    builder: (_) => const DeviceSettingsScreen(),
-  ),
-  AppNavItem(
-    icon: Icons.history,
-    label: 'Historial',
-    builder: (_) =>
-        PatientHistoryScreen(navItems: patientHomeNavItems(), currentIndex: 2),
-  ),
-  AppNavItem(
-    icon: Icons.receipt,
-    label: 'Facturación',
-    builder: (_) => const BillingScreen(),
-  ),
-  AppNavItem(
-    icon: Icons.person,
-    label: 'Perfil',
-    builder: (_) => const PatientProfileScreen(),
-  ),
-];
+enum PatientTab {
+  inicio,
+  cuidadores,
+  dispositivo,
+  historial,
+  facturacion,
+  perfil,
+}
 
-List<AppNavItem> patientCaregiversNavItems() => [
-  AppNavItem(
+/// El diseño tiene dos barras para el paciente: si tiene cuidadores
+/// asignados aparece "Cuidadores" en lugar de "Facturación".
+List<PatientTab> _patientTabs() =>
+    (AuthService.instance.current?.hasCaregivers ?? false)
+    ? const [
+        PatientTab.inicio,
+        PatientTab.cuidadores,
+        PatientTab.dispositivo,
+        PatientTab.historial,
+        PatientTab.perfil,
+      ]
+    : const [
+        PatientTab.inicio,
+        PatientTab.dispositivo,
+        PatientTab.historial,
+        PatientTab.facturacion,
+        PatientTab.perfil,
+      ];
+
+AppNavItem _patientItem(PatientTab tab) => switch (tab) {
+  PatientTab.inicio => AppNavItem(
     icon: Icons.home,
     label: 'Inicio',
     builder: (_) => const PatientHomeScreen(),
   ),
-  AppNavItem(
+  PatientTab.cuidadores => AppNavItem(
     icon: Icons.people,
     label: 'Cuidadores',
     builder: (_) => const PatientCaregiversScreen(),
   ),
-  AppNavItem(
+  PatientTab.dispositivo => AppNavItem(
     icon: Icons.devices,
     label: 'Dispositivo',
     builder: (_) => const DeviceSettingsScreen(),
   ),
-  AppNavItem(
+  PatientTab.historial => AppNavItem(
     icon: Icons.history,
     label: 'Historial',
     builder: (_) => PatientHistoryScreen(
-      navItems: patientCaregiversNavItems(),
-      currentIndex: 3,
+      navItems: patientNavItems(),
+      currentIndex: patientTabIndex(PatientTab.historial),
     ),
   ),
-  AppNavItem(
+  PatientTab.facturacion => AppNavItem(
+    icon: Icons.receipt,
+    label: 'Facturación',
+    builder: (_) => const BillingScreen(),
+  ),
+  PatientTab.perfil => AppNavItem(
     icon: Icons.person,
     label: 'Perfil',
     builder: (_) => const PatientProfileScreen(),
   ),
+};
+
+List<AppNavItem> patientNavItems() => [
+  for (final tab in _patientTabs()) _patientItem(tab),
 ];
+
+/// Posición de [tab] en la barra actual (0 si esa barra no la tiene).
+int patientTabIndex(PatientTab tab) {
+  final index = _patientTabs().indexOf(tab);
+  return index < 0 ? 0 : index;
+}
+
+AppBottomNav patientBottomNav(PatientTab tab) =>
+    AppBottomNav(items: patientNavItems(), currentIndex: patientTabIndex(tab));
 
 List<AppNavItem> caregiverNavItems() => [
   AppNavItem(
@@ -96,7 +114,7 @@ List<AppNavItem> caregiverNavItems() => [
   AppNavItem(
     icon: Icons.receipt,
     label: 'Facturación',
-    builder: (_) => const BillingScreen(),
+    builder: (_) => const BillingScreen(caregiverNav: true),
   ),
   AppNavItem(
     icon: Icons.person,

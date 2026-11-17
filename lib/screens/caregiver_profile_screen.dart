@@ -1,28 +1,69 @@
 import 'package:flutter/material.dart';
 
 import '../navigation/nav_items.dart';
+import '../services/admin_service.dart';
+import '../services/auth_service.dart';
+import '../services/care_service.dart';
+import '../services/records_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_decorations.dart';
 import '../theme/app_text_styles.dart';
-import '../widgets/screen_title.dart';
 import '../widgets/app_bottom_nav.dart';
-import '../widgets/info_card.dart';
+import '../widgets/initials_avatar.dart';
 import '../widgets/profile_parts.dart';
+import '../widgets/record_sections.dart';
+import '../widgets/screen_title.dart';
+import '../widgets/state_views.dart';
 import '../widgets/status_badge.dart';
+import 'caregiver_data_form_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'terms_screen.dart';
 
-class CaregiverProfileScreen extends StatelessWidget {
+class CaregiverProfileScreen extends StatefulWidget {
   const CaregiverProfileScreen({super.key});
 
-  void _push(BuildContext context, Widget screen) {
+  @override
+  State<CaregiverProfileScreen> createState() => _CaregiverProfileScreenState();
+}
+
+class _CaregiverProfileScreenState extends State<CaregiverProfileScreen> {
+  final String _uid = AuthService.instance.currentUid ?? '';
+  late Stream<CaregiverRecord> _record;
+  late Stream<ManagedUser> _account;
+  late Stream<List<CareAssignment>> _patients;
+
+  @override
+  void initState() {
+    super.initState();
+    _watch();
+  }
+
+  void _watch() {
+    _record = RecordsService.instance.watchCaregiver(_uid);
+    _account = RecordsService.instance.watchAccount(_uid);
+    _patients = CareService.instance.watchForCaregiver(_uid);
+  }
+
+  void _push(Widget screen) {
     Navigator.push(context, MaterialPageRoute(builder: (context) => screen));
   }
 
-  void _showDemoMessage(BuildContext context, String message) {
-    ScaffoldMessenger.of(
+  Future<void> _edit(CaregiverRecord record, String name) async {
+    final message = await Navigator.push<String>(
       context,
-    ).showSnackBar(SnackBar(content: Text('$message (demo, sin backend)')));
+      MaterialPageRoute(
+        builder: (_) => CaregiverDataFormScreen(
+          caregiverUid: _uid,
+          caregiverName: name,
+          record: record,
+        ),
+      ),
+    );
+    if (message != null && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   @override
@@ -30,7 +71,35 @@ class CaregiverProfileScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.bgDeep,
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: StreamBuilder<CaregiverRecord>(
+          stream: _record,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return ErrorView(
+                onRetry: () => setState(_watch),
+                message: AuthService.describeError(snapshot.error!),
+              );
+            }
+            if (!snapshot.hasData) return const LoadingView();
+            return _buildBody(snapshot.data!);
+          },
+        ),
+      ),
+      bottomNavigationBar: AppBottomNav(
+        items: caregiverNavItems(),
+        currentIndex: 4,
+      ),
+    );
+  }
+
+  Widget _buildBody(CaregiverRecord record) {
+    return StreamBuilder<ManagedUser>(
+      stream: _account,
+      builder: (context, snapshot) {
+        final account = snapshot.data;
+        final name =
+            account?.fullName ?? AuthService.instance.current?.fullName ?? '';
+        return SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -41,62 +110,85 @@ class CaregiverProfileScreen extends StatelessWidget {
                 child: Column(
                   spacing: 8,
                   children: [
-                    Container(
-                      width: 64,
-                      height: 64,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [AppColors.violet, AppColors.cyan],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                      ),
-                      child: Text(
-                        'MG',
-                        style: AppTextStyles.display(
-                          fontSize: 20,
-                          color: AppColors.bgPanel2,
-                        ),
-                      ),
-                    ),
+                    InitialsAvatar(initialsOf(name), size: 64),
                     Text(
-                      'María González',
+                      name,
+                      textAlign: TextAlign.center,
                       style: AppTextStyles.display(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     const StatusBadge(
-                      text: 'Cuidadora · Madre',
+                      text: 'Cuidador / tutor',
                       tone: StatusBadgeTone.warn,
                     ),
                   ],
                 ),
               ),
-              const ProfileSectionTitle('Datos personales'),
-              const InfoCard(
-                rows: [
-                  InfoRow('Documento', value: '3.998.201'),
-                  InfoRow('Fecha de nacimiento', value: '22 jul 1970'),
-                  InfoRow('Sexo', value: 'Femenino'),
-                  InfoRow('Ocupación', value: 'Ama de casa'),
-                ],
-              ),
-              const ProfileSectionTitle('Contacto'),
-              const InfoCard(
-                rows: [
-                  InfoRow('Teléfono', value: '0982 111 222'),
-                  InfoRow(
-                    'Correo alternativo',
-                    value: 'maria.gonzalez@mail.com',
-                  ),
-                  InfoRow('Dirección', value: 'San Lorenzo, PY'),
-                ],
-              ),
+              CaregiverRecordSections(record: record, account: account),
               const ProfileSectionTitle('Pacientes a cargo'),
+              _PatientsList(stream: _patients),
+              if (account != null) AccountSection(account: account),
+              const SecuritySection(),
+              const SizedBox(height: 16),
+              GhostButton(
+                'Editar datos personales',
+                onPressed: () => _edit(record, name),
+              ),
+              const ChangePasswordButton(),
+              GhostButton(
+                'Política de privacidad',
+                onPressed: () => _push(const PrivacyPolicyScreen()),
+              ),
+              GhostButton(
+                'Términos y Condiciones',
+                onPressed: () => _push(const TermsScreen()),
+              ),
+              const ThemeToggleTile(),
+              const LogoutButton(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PatientsList extends StatelessWidget {
+  const _PatientsList({required this.stream});
+
+  final Stream<List<CareAssignment>> stream;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<CareAssignment>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final patients = snapshot.data;
+        if (patients == null || patients.isEmpty) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: glassCardDecoration(radius: 14),
+            child: Text(
+              snapshot.hasError
+                  ? AuthService.describeError(snapshot.error!)
+                  : patients == null
+                  ? 'Cargando…'
+                  : 'Todavía no tenés pacientes asignados.',
+              style: AppTextStyles.body(
+                fontSize: 12,
+                color: AppColors.textMute,
+              ),
+            ),
+          );
+        }
+        return Column(
+          children: [
+            for (final a in patients)
               Container(
+                margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.symmetric(
                   vertical: 12,
                   horizontal: 14,
@@ -105,40 +197,21 @@ class CaregiverProfileScreen extends StatelessWidget {
                 child: Row(
                   spacing: 12,
                   children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [AppColors.violet, AppColors.cyan],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                      ),
-                      child: Text(
-                        'MR',
-                        style: AppTextStyles.display(
-                          fontSize: 13,
-                          color: AppColors.bgPanel2,
-                        ),
-                      ),
-                    ),
+                    InitialsAvatar(initialsOf(a.nombrePaciente)),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
+                        spacing: 2,
                         children: [
                           Text(
-                            'Marcos Rojas',
+                            a.nombrePaciente,
                             style: AppTextStyles.body(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(height: 2),
                           Text(
-                            'Principal · puede editar datos y calibrar',
+                            '${a.relation} · ${a.permisos.summary}',
                             style: AppTextStyles.body(
                               fontSize: 11,
                               color: AppColors.textMute,
@@ -150,43 +223,9 @@ class CaregiverProfileScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              const ProfileSectionTitle('Cuenta'),
-              const InfoCard(
-                rows: [
-                  InfoRow('Correo', value: 'maria.gonzalez@mail.com'),
-                  InfoRow('Último acceso', value: 'Hoy, 08:10'),
-                  InfoRow('Miembro desde', value: 'Feb 2024'),
-                ],
-              ),
-              const SizedBox(height: 16),
-              GhostButton(
-                'Editar datos personales',
-                onPressed: () =>
-                    _showDemoMessage(context, 'Editar datos personales'),
-              ),
-              GhostButton(
-                'Cambiar contraseña',
-                onPressed: () =>
-                    _showDemoMessage(context, 'Cambiar contraseña'),
-              ),
-              GhostButton(
-                'Política de privacidad',
-                onPressed: () => _push(context, const PrivacyPolicyScreen()),
-              ),
-              GhostButton(
-                'Términos y Condiciones',
-                onPressed: () => _push(context, const TermsScreen()),
-              ),
-              const ThemeToggleTile(),
-              const LogoutButton(),
-            ],
-          ),
-        ),
-      ),
-      bottomNavigationBar: AppBottomNav(
-        items: caregiverNavItems(),
-        currentIndex: 4,
-      ),
+          ],
+        );
+      },
     );
   }
 }

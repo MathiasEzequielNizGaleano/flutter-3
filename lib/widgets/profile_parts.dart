@@ -1,11 +1,138 @@
 import 'package:flutter/material.dart';
 
+import '../navigation/session_guard.dart';
 import '../screens/login_screen.dart';
+import '../screens/two_factor_settings_screen.dart';
+import '../services/auth_service.dart';
+import '../services/session_service.dart';
 import '../l10n/app_strings.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_decorations.dart';
 import '../theme/app_text_styles.dart';
 import '../theme/app_theme.dart';
+import 'confirm_dialog.dart';
+import 'info_card.dart';
+import 'status_badge.dart';
+
+/// Envía el correo para cambiar la contraseña de la sesión actual.
+class ChangePasswordButton extends StatelessWidget {
+  const ChangePasswordButton({super.key});
+
+  Future<void> _send(BuildContext context) async {
+    final email = AuthService.instance.current?.email;
+    if (email == null || email.isEmpty) return;
+    final confirmed = await confirmAction(
+      context,
+      title: 'Cambiar contraseña',
+      message:
+          'Te vamos a enviar un correo a $email con un enlace para elegir una '
+          'contraseña nueva.',
+      confirmLabel: 'Enviar correo',
+      danger: false,
+    );
+    if (!confirmed || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await AuthService.instance.sendPasswordReset(email);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Listo. Revisá tu correo ($email).')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      GhostButton('Cambiar contraseña', onPressed: () => _send(context));
+}
+
+/// Seguridad de la cuenta: dónde llega el código de la verificación en dos
+/// pasos (con el botón para cambiarlo) y cierre de las otras sesiones.
+class SecuritySection extends StatefulWidget {
+  const SecuritySection({super.key, this.extraRows = const []});
+
+  final List<InfoRow> extraRows;
+
+  @override
+  State<SecuritySection> createState() => _SecuritySectionState();
+}
+
+class _SecuritySectionState extends State<SecuritySection> {
+  Future<void> _open(AppUser user) async {
+    final message = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => TwoFactorSettingsScreen(user: user)),
+    );
+    if (message == null || !mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _closeOthers(AppUser user) async {
+    final confirmed = await confirmAction(
+      context,
+      title: '¿Cerrar las otras sesiones?',
+      message:
+          'Se cierra tu sesión en cualquier otro teléfono donde hayas '
+          'ingresado. En este seguís conectado.',
+      confirmLabel: 'Cerrar las otras',
+    );
+    if (!confirmed || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await SessionService.instance.closeOthers(user);
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Listo. Se cerró tu sesión en los demás dispositivos.'),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = AuthService.instance.current;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const ProfileSectionTitle('Seguridad'),
+        InfoCard(
+          rows: [
+            const InfoRow(
+              'Verificación en 2 pasos',
+              trailing: StatusBadge(text: 'Activa'),
+            ),
+            InfoRow(
+              'Código por',
+              value: user == null ? 'Correo' : twoFactorSummary(user),
+            ),
+            ...widget.extraRows,
+          ],
+        ),
+        if (user != null) ...[
+          const SizedBox(height: 10),
+          GhostButton(
+            'Cambiar dónde recibo el código',
+            onPressed: () => _open(user),
+          ),
+          GhostButton(
+            'Cerrar sesión en los otros dispositivos',
+            onPressed: () => _closeOthers(user),
+          ),
+        ],
+      ],
+    );
+  }
+}
 
 class ProfileSectionTitle extends StatelessWidget {
   const ProfileSectionTitle(this.text, {super.key});
@@ -107,11 +234,15 @@ class LogoutButton extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
     width: double.infinity,
     child: OutlinedButton.icon(
-      onPressed: () => Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-        (route) => false,
-      ),
+      onPressed: () async {
+        final navigator = Navigator.of(context);
+        SessionGuard.stop();
+        await AuthService.instance.signOut();
+        navigator.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (route) => false,
+        );
+      },
       icon: Icon(Icons.logout, color: AppColors.coral, size: 18),
       label: Text(
         'Cerrar sesión',

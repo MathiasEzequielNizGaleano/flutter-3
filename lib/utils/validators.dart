@@ -8,6 +8,7 @@ class Validators {
   static final _name = RegExp(r"^\p{L}[\p{L} '’.\-]*$", unicode: true);
   static final _cedula = RegExp(r'^\d{6,8}$');
   static final _passport = RegExp(r'^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{6,9}$');
+  static final _phone = RegExp(r'^\+?[0-9 ()\-]{6,20}$');
 
   static String? required(String? value, [String? message]) {
     if (value == null || value.trim().isEmpty) {
@@ -20,6 +21,17 @@ class Validators {
     final missing = required(value);
     if (missing != null) return missing;
     return _email.hasMatch(value!.trim()) ? null : AppStrings.invalidEmail;
+  }
+
+  /// Correo opcional: vacío es válido.
+  static String? optionalEmail(String? value) =>
+      (value == null || value.trim().isEmpty) ? null : email(value);
+
+  /// Teléfono opcional: dígitos, espacios, guiones, paréntesis y "+".
+  static String? optionalPhone(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    return _phone.hasMatch(text) ? null : 'Ingresa un teléfono válido.';
   }
 
   static String? userOrEmail(String? value) {

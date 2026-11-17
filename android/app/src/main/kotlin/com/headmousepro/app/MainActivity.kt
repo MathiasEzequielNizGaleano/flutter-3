@@ -1,4 +1,4 @@
-package com.example.headmouse_pro
+package com.headmousepro.app
 
 import io.flutter.embedding.android.FlutterActivity
 

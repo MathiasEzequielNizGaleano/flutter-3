@@ -8,20 +8,27 @@ import 'package:headmouse_pro/screens/privacy_policy_screen.dart';
 import 'package:headmouse_pro/screens/terms_screen.dart';
 import 'package:headmouse_pro/widgets/terms_acceptance.dart';
 import 'package:headmouse_pro/screens/register_screen.dart';
-import 'package:headmouse_pro/widgets/role_selector.dart';
-import 'package:headmouse_pro/widgets/recaptcha_placeholder.dart';
+import 'package:headmouse_pro/services/auth_service.dart';
+import 'package:headmouse_pro/widgets/recaptcha_check.dart';
+import 'package:headmouse_pro/screens/two_factor_screen.dart';
 import 'package:headmouse_pro/theme/app_input_decoration.dart';
 import 'package:headmouse_pro/l10n/app_strings.dart';
 import 'package:headmouse_pro/utils/validators.dart';
 
-const _loginRoles = [
-  RoleOption(label: 'Paciente', icon: Icons.accessibility_new),
-  RoleOption(label: 'Cuidador / tutor', icon: Icons.favorite_border_outlined),
-  RoleOption(label: 'Administrador', icon: Icons.shield_outlined),
-];
+/// Pantalla de inicio según el rol guardado en la cuenta (no lo elige el
+/// usuario al entrar).
+Widget homeFor(UserRole role) => switch (role) {
+  UserRole.cuidador => const CaregiverPatientsScreen(),
+  UserRole.admin => const AdminPanelScreen(),
+  UserRole.paciente => const PatientHomeScreen(),
+};
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.notice});
+
+  /// Aviso al volver al login (por ejemplo, sesión cerrada desde otro
+  /// dispositivo).
+  final String? notice;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -34,7 +41,26 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isLoggingIn = false;
   bool _acceptedTerms = false;
-  String _selectedRole = _loginRoles.first.label;
+  bool _notRobot = false;
+
+  bool get _canLogin => _acceptedTerms && _notRobot && !_isLoggingIn;
+
+  @override
+  void initState() {
+    super.initState();
+    final notice = widget.notice;
+    if (notice != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(notice),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -64,22 +90,38 @@ class _LoginScreenState extends State<LoginScreen> {
       _isLoggingIn = true;
     });
 
-    await Future.delayed(const Duration(seconds: 2));
+    final AppUser user;
+    try {
+      user = await AuthService.instance.signIn(
+        email: _userController.text,
+        password: _passwordController.text,
+      );
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      // Como el reCAPTCHA real: después de un intento fallido hay que
+      // volver a marcar la casilla.
+      setState(() {
+        _isLoggingIn = false;
+        _notRobot = false;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
 
     if (!mounted) return;
     setState(() {
       _isLoggingIn = false;
     });
 
-    final Widget destination = switch (_selectedRole) {
-      'Cuidador / tutor' => const CaregiverPatientsScreen(),
-      'Administrador' => const AdminPanelScreen(),
-      _ => const PatientHomeScreen(),
-    };
-
+    // Segundo paso: el código de verificación.
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => destination),
+      MaterialPageRoute(
+        builder: (context) =>
+            TwoFactorScreen(user: user, destination: (_) => homeFor(user.role)),
+      ),
     );
   }
 
@@ -145,21 +187,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 32),
-                        RoleSelector(
-                          label: AppStrings.loginAs,
-                          roles: _loginRoles,
-                          selectedRole: _selectedRole,
-                          onChanged: (role) {
-                            setState(() => _selectedRole = role);
-                          },
-                        ),
-                        const SizedBox(height: 16),
                         TextFormField(
                           controller: _userController,
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
-                          autofillHints: const [AutofillHints.username],
-                          validator: Validators.userOrEmail,
+                          autofillHints: const [AutofillHints.email],
+                          validator: Validators.email,
                           style: AppTextStyles.body(fontSize: 13),
                           decoration: appFieldDecoration(
                             hintText: AppStrings.userHint,
@@ -173,7 +206,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           autofillHints: const [AutofillHints.password],
                           validator: Validators.loginPassword,
                           onFieldSubmitted: (_) {
-                            if (_acceptedTerms && !_isLoggingIn) _handleLogin();
+                            if (_canLogin) _handleLogin();
                           },
                           style: AppTextStyles.body(fontSize: 13),
                           decoration: appFieldDecoration(
@@ -209,7 +242,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           onTermsTap: _openTerms,
                         ),
                         const SizedBox(height: 16),
-                        const RecaptchaPlaceholder(),
+                        RecaptchaCheck(
+                          value: _notRobot,
+                          onChanged: (value) =>
+                              setState(() => _notRobot = value),
+                        ),
                         const SizedBox(height: 16),
                         Container(
                           decoration: BoxDecoration(
@@ -219,7 +256,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
-                            boxShadow: _acceptedTerms
+                            boxShadow: _canLogin
                                 ? [
                                     BoxShadow(
                                       color: AppColors.cyan.withValues(
@@ -231,9 +268,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 : [],
                           ),
                           child: ElevatedButton(
-                            onPressed: _acceptedTerms && !_isLoggingIn
-                                ? _handleLogin
-                                : null,
+                            onPressed: _canLogin ? _handleLogin : null,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.transparent,
                               disabledBackgroundColor: Colors.transparent,
@@ -262,7 +297,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       style: AppTextStyles.body(
                                         fontSize: 18,
                                         fontWeight: FontWeight.w600,
-                                        color: _acceptedTerms
+                                        color: _canLogin
                                             ? AppColors.bgPanel2
                                             : AppColors.textMute,
                                       ),

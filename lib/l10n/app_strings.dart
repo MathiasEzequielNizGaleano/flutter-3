@@ -6,7 +6,7 @@ class AppStrings {
 
   static const loginAs = 'INGRESA COMO';
   static const registerAs = 'REGISTRARME COMO';
-  static const userHint = 'Usuario o correo electrónico';
+  static const userHint = 'Correo electrónico';
   static const emailHint = 'Correo electrónico';
   static const passwordHint = 'Contraseña';
   static const confirmPasswordHint = 'Confirmar contraseña';

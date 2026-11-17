@@ -1,120 +1,41 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../navigation/nav_items.dart';
+import '../services/admin_service.dart';
+import '../services/auth_service.dart';
+import '../services/billing_service.dart';
+import '../services/device_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_decorations.dart';
 import '../theme/app_input_decoration.dart';
 import '../theme/app_text_styles.dart';
+import '../utils/date_format.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../widgets/confirm_dialog.dart';
 import '../widgets/filter_chips.dart';
+import '../widgets/gradient_button.dart';
+import '../widgets/payment_tile.dart';
+import '../widgets/profile_parts.dart';
+import '../widgets/state_views.dart';
 import '../widgets/status_badge.dart';
 import '../widgets/unsaved_changes_guard.dart';
-
-enum _PlanState { premium, none, expired }
-
-class _PlanDevice {
-  const _PlanDevice({
-    required this.name,
-    required this.owner,
-    required this.segment,
-    required this.active,
-    required this.state,
-    required this.planDetail,
-    required this.dateLabel,
-    required this.date,
-    required this.actions,
-    required this.changeLabel,
-    required this.changeDetail,
-  });
-
-  final String name;
-  final String owner;
-  final String segment;
-  final bool active;
-  final _PlanState state;
-  final String planDetail;
-  final String dateLabel;
-  final String date;
-  final List<String> actions;
-  final String changeLabel;
-  final String changeDetail;
-}
-
-const _planDevices = [
-  _PlanDevice(
-    name: 'HeadMouse Pro · #0231',
-    owner: 'Paciente: Juan Paredes',
-    segment: 'B2B',
-    active: true,
-    state: _PlanState.premium,
-    planDetail: 'Gs. 500.000/mes · vence 30 oct',
-    dateLabel: 'Fecha de pago',
-    date: '30/10/2026',
-    actions: ['Registrar pago', 'Dar de baja'],
-    changeLabel: 'Plan renovado',
-    changeDetail: 'admin_root · Hoy 10:20',
-  ),
-  _PlanDevice(
-    name: 'HeadMouse Pro · #0198',
-    owner: 'Paciente: Marcos Rojas',
-    segment: 'B2C',
-    active: true,
-    state: _PlanState.premium,
-    planDetail: 'Gs. 200.000/mes · vence 15 oct',
-    dateLabel: 'Fecha de pago',
-    date: '15/10/2026',
-    actions: ['Registrar pago', 'Dar de baja'],
-    changeLabel: 'Pago registrado (QR Bancard)',
-    changeDetail: 'admin_root · 15 sep',
-  ),
-  _PlanDevice(
-    name: 'HeadMouse Pro · #0087',
-    owner: 'Paciente: Lucía Fernández',
-    segment: 'B2C',
-    active: false,
-    state: _PlanState.none,
-    planDetail: 'Soporte por incidente Gs. 210.000',
-    dateLabel: 'Primera fecha de pago',
-    date: 'dd/mm/aaaa',
-    actions: ['Activar Premium'],
-    changeLabel: 'Plan dado de baja',
-    changeDetail: 'admin_root · 02 sep',
-  ),
-  _PlanDevice(
-    name: 'HeadMouse Pro · Respaldo #0045',
-    owner: 'Paciente: Ana Torres',
-    segment: 'B2B',
-    active: false,
-    state: _PlanState.expired,
-    planDetail: '12 sep · personalización y soporte prioritario deshabilitados',
-    dateLabel: 'Debía pagar',
-    date: '12/09/2026',
-    actions: ['Registrar pago y reactivar'],
-    changeLabel: 'Vencimiento automático',
-    changeDetail: 'Sistema · 12 sep',
-  ),
-];
-
-class _Tariff {
-  const _Tariff(this.label, this.sub, this.amount);
-
-  final String label;
-  final String sub;
-  final String amount;
-}
-
-const _tariffs = [
-  _Tariff('Dispositivo B2C', 'Pago único', '1.550.000'),
-  _Tariff('Dispositivo B2B', 'Pago único por unidad', '1.380.000'),
-  _Tariff('Plan Premium B2C', 'Mensual', '200.000'),
-  _Tariff('Plan Premium B2B', 'Mensual, institucional', '500.000'),
-  _Tariff('Soporte sin plan B2C', 'Por solicitud', '210.000'),
-  _Tariff('Soporte sin plan B2B', 'Por solicitud', '300.000'),
-  _Tariff('Capacitación del personal', 'Por evento, B2B', '350.000'),
-];
+import 'payment_register_screen.dart';
+import 'receipt_screen.dart';
 
 const _planFilters = ['Todos', 'Premium', 'Sin plan', 'Vencidos', 'B2C', 'B2B'];
 
+/// Un paciente con su plan y sus equipos.
+class _PlanRow {
+  const _PlanRow(this.user, this.plan, this.devices);
+
+  final ManagedUser user;
+  final PremiumPlan plan;
+  final List<HeadMouseDevice> devices;
+}
+
+/// Plan Premium de cada paciente, pagos por confirmar y tarifas.
 class AdminPlansScreen extends StatefulWidget {
   const AdminPlansScreen({super.key});
 
@@ -123,248 +44,606 @@ class AdminPlansScreen extends StatefulWidget {
 }
 
 class _AdminPlansScreenState extends State<AdminPlansScreen> {
-  String _filter = 'Todos';
-  late final List<TextEditingController> _tariffControllers = [
-    for (final tariff in _tariffs) TextEditingController(text: tariff.amount),
-  ];
+  final _subs = <StreamSubscription<Object?>>[];
+  List<ManagedUser>? _users;
+  Map<String, PremiumPlan>? _plans;
+  List<Payment>? _payments;
+  List<HeadMouseDevice>? _devices;
 
-  late List<String> _savedAmounts = [
-    for (final tariff in _tariffs) tariff.amount,
-  ];
+  /// Tarifas guardadas en Firestore.
+  Tariffs? _tariffs;
+  Object? _error;
+  String _filter = _planFilters.first;
+  bool _savingTariffs = false;
+  final _tariffControllers = {
+    for (final t in Tariff.values) t: TextEditingController(),
+  };
 
-  bool get _hasUnsavedChanges {
-    for (var i = 0; i < _tariffControllers.length; i++) {
-      if (_tariffControllers[i].text != _savedAmounts[i]) return true;
-    }
-    return false;
-  }
+  BillingService get _billing => BillingService.instance;
 
-  void _saveTariffs() {
-    setState(() {
-      _savedAmounts = [for (final c in _tariffControllers) c.text];
-    });
-    _showDemoMessage('Tarifas guardadas');
+  @override
+  void initState() {
+    super.initState();
+    _subscribe();
   }
 
   @override
   void dispose() {
-    for (final controller in _tariffControllers) {
+    for (final sub in _subs) {
+      sub.cancel();
+    }
+    for (final controller in _tariffControllers.values) {
       controller.dispose();
     }
     super.dispose();
   }
 
-  void _showDemoMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$message (demo, sin backend)')));
+  void _subscribe() {
+    for (final sub in _subs) {
+      sub.cancel();
+    }
+    _subs.clear();
+    _error = null;
+    void fail(Object e) {
+      if (mounted) setState(() => _error = e);
+    }
+
+    _subs.addAll([
+      AdminService.instance.watchUsers().listen(
+        (v) => setState(() => _users = v),
+        onError: fail,
+      ),
+      _billing.watchPlans().listen(
+        (v) => setState(() => _plans = {for (final p in v) p.idPaciente: p}),
+        onError: fail,
+      ),
+      _billing.watchAllPayments().listen(
+        (v) => setState(() => _payments = v),
+        onError: fail,
+      ),
+      DeviceService.instance.watchDevices().listen(
+        (v) => setState(() => _devices = v),
+        onError: fail,
+      ),
+      _billing.watchTariffs().listen(_onTariffs, onError: fail),
+    ]);
   }
 
-  bool _matches(_PlanDevice device) => switch (_filter) {
-    'Premium' => device.state == _PlanState.premium,
-    'Sin plan' => device.state == _PlanState.none,
-    'Vencidos' => device.state == _PlanState.expired,
-    'B2C' => device.segment == 'B2C',
-    'B2B' => device.segment == 'B2B',
+  void _onTariffs(Tariffs tariffs) {
+    // Lo que está escribiendo el administrador no se pisa.
+    final editing = _tariffs != null && _tariffsChanged;
+    setState(() => _tariffs = tariffs);
+    if (editing) return;
+    for (final MapEntry(key: tariff, value: controller)
+        in _tariffControllers.entries) {
+      controller.text = formatAmount(tariffs.of(tariff));
+    }
+  }
+
+  bool get _tariffsChanged {
+    final saved = _tariffs;
+    if (saved == null) return false;
+    return _tariffControllers.entries.any(
+      (e) => parseGs(e.value.text) != saved.of(e.key),
+    );
+  }
+
+  void _show(String message) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(message)));
+
+  Future<void> _act(Future<void> Function() action, String done) async {
+    try {
+      await action();
+      if (mounted) _show(done);
+    } on AuthException catch (e) {
+      if (mounted) _show(e.message);
+    }
+  }
+
+  List<_PlanRow> get _rows {
+    final plans = _plans!;
+    return [
+      for (final u in _users!)
+        if (u.role == UserRole.paciente && u.active)
+          _PlanRow(
+            u,
+            (plans[u.uid] ?? PremiumPlan(idPaciente: u.uid)).withName(
+              u.fullName,
+            ),
+            [
+              for (final d in _devices!)
+                if (d.idPaciente == u.uid) d,
+            ],
+          ),
+    ]..sort((a, b) => a.user.fullName.compareTo(b.user.fullName));
+  }
+
+  bool _matches(_PlanRow row) => switch (_filter) {
+    'Premium' => row.plan.status == PlanStatus.premium,
+    'Sin plan' => row.plan.status == PlanStatus.sinPlan,
+    'Vencidos' => row.plan.status == PlanStatus.vencido,
+    'B2C' => row.plan.segmento == Segment.b2c,
+    'B2B' => row.plan.segmento == Segment.b2b,
     _ => true,
   };
+
+  Future<void> _onAction(_PlanRow row, String action) async {
+    final plan = row.plan;
+    final name = row.user.fullName;
+    switch (action) {
+      case 'Dar de baja':
+        final confirmed = await confirmAction(
+          context,
+          title: '¿Dar de baja el Plan Premium?',
+          message:
+              '$name pierde las funciones Premium ahora mismo. Los pagos '
+              'anteriores quedan registrados.',
+          confirmLabel: 'Dar de baja',
+        );
+        if (!confirmed) return;
+        await _act(
+          () => _billing.endPlan(plan),
+          'Plan Premium de $name dado de baja.',
+        );
+      case 'Pasar a B2B' || 'Pasar a B2C':
+        final segment = plan.segmento == Segment.b2c
+            ? Segment.b2b
+            : Segment.b2c;
+        final confirmed = await confirmAction(
+          context,
+          title: '¿$action?',
+          message:
+              'A partir de ahora a $name se le cobran las tarifas de '
+              '${segment.label}.',
+          confirmLabel: action,
+          danger: false,
+        );
+        if (!confirmed) return;
+        await _act(
+          () => _billing.setSegment(plan, segment),
+          '$name ahora es ${segment.label}.',
+        );
+      default:
+        final tariffs = _tariffs;
+        if (tariffs == null || !mounted) return;
+        final message = await Navigator.push<String>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PaymentRegisterScreen(
+              plan: plan,
+              patientName: name,
+              tariffs: tariffs,
+            ),
+          ),
+        );
+        if (message != null && mounted) _show(message);
+    }
+  }
+
+  Future<void> _confirm(Payment p) async {
+    final confirmed = await confirmAction(
+      context,
+      title: '¿Confirmar el pago?',
+      message:
+          '${p.concepto.label} de ${p.nombrePaciente}\n'
+          '${formatGs(p.monto)} · ${p.metodo.label}'
+          '${p.referencia.isEmpty ? '' : '\nReferencia: ${p.referencia}'}\n\n'
+          'Confirmalo solo si ya recibiste la plata.',
+      confirmLabel: 'Confirmar pago',
+      danger: false,
+    );
+    if (!confirmed) return;
+    final plan =
+        (_plans?[p.idPaciente] ?? PremiumPlan(idPaciente: p.idPaciente))
+            .withName(p.nombrePaciente);
+    await _act(
+      () => _billing.confirmPayment(p, plan),
+      'Pago de ${p.nombrePaciente} confirmado.',
+    );
+  }
+
+  Future<void> _reject(Payment p) async {
+    final reason = await _askReason(context);
+    if (reason == null) return;
+    await _act(
+      () => _billing.rejectPayment(p, reason),
+      'Pago de ${p.nombrePaciente} rechazado.',
+    );
+  }
+
+  void _open(Payment p) => Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => ReceiptScreen(payment: p)),
+  );
+
+  Future<void> _saveTariffs() async {
+    final before = _tariffs;
+    if (before == null) return;
+    var after = before;
+    for (final MapEntry(key: tariff, value: controller)
+        in _tariffControllers.entries) {
+      final amount = parseGs(controller.text);
+      if (amount == null) {
+        _show('Revisá "${tariff.label}": tiene que ser un monto mayor que 0.');
+        return;
+      }
+      after = after.copyWith(tariff, amount);
+    }
+    setState(() => _savingTariffs = true);
+    await _act(() => _billing.saveTariffs(before, after), 'Tarifas guardadas.');
+    if (mounted) setState(() => _savingTariffs = false);
+  }
 
   @override
   Widget build(BuildContext context) {
     return UnsavedChangesGuard(
-      hasChanges: () => _hasUnsavedChanges,
-      listenable: Listenable.merge(_tariffControllers),
-      child: _buildScaffold(context),
+      hasChanges: () => _tariffsChanged,
+      listenable: Listenable.merge(_tariffControllers.values.toList()),
+      child: Scaffold(
+        backgroundColor: AppColors.bgDeep,
+        appBar: AppBar(
+          backgroundColor: AppColors.bgDeep,
+          foregroundColor: AppColors.text,
+          title: Text(
+            'Planes y pagos',
+            style: AppTextStyles.display(fontSize: 18),
+          ),
+        ),
+        body: SafeArea(child: _body()),
+        bottomNavigationBar: AppBottomNav(
+          items: adminNavItems(),
+          currentIndex: 0,
+        ),
+      ),
     );
   }
 
-  Widget _buildScaffold(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bgDeep,
-      appBar: AppBar(
-        backgroundColor: AppColors.bgDeep,
-        foregroundColor: AppColors.text,
-        title: Text(
-          'Dispositivos y planes',
-          style: AppTextStyles.display(fontSize: 18),
-        ),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _body() {
+    final error = _error;
+    if (error != null) {
+      return ErrorView(
+        onRetry: () => setState(_subscribe),
+        message: AuthService.describeError(error),
+      );
+    }
+    if (_users == null ||
+        _plans == null ||
+        _payments == null ||
+        _devices == null ||
+        _tariffs == null) {
+      return const LoadingView();
+    }
+    final tariffs = _tariffs!;
+    final rows = _rows;
+    final shown = rows.where(_matches).toList();
+    final pending = _payments!.where((p) => p.pendiente).toList();
+    int count(PlanStatus s) => rows.where((r) => r.plan.status == s).length;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            spacing: 10,
             children: [
-              Row(
-                spacing: 10,
-                children: [
-                  Expanded(
-                    child: _StatCard(num: '38', label: 'Premium'),
-                  ),
-                  Expanded(
-                    child: _StatCard(num: '49', label: 'Sin plan'),
-                  ),
-                  Expanded(
-                    child: _StatCard(
-                      num: '7',
-                      label: 'Vencidos',
-                      numColor: AppColors.amber,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              FilterChips(
-                options: _planFilters,
-                selected: _filter,
-                onChanged: (chip) => setState(() => _filter = chip),
-              ),
-              const SizedBox(height: 14),
-              for (final device in _planDevices.where(_matches))
-                _PlanDeviceCard(
-                  device: device,
-                  onAction: (action) => _showDemoMessage(action),
-                ),
-              Text(
-                'La fecha de pago que definas en cada dispositivo es la que '
-                'ven el paciente y su cuidador en Facturación como “Próximo '
-                'pago”. Al registrar un pago, la fecha avanza un mes.',
-                style: AppTextStyles.body(
-                  fontSize: 11,
-                  color: AppColors.textMute,
+              Expanded(
+                child: _StatCard(
+                  num: '${count(PlanStatus.premium)}',
+                  label: 'Premium',
                 ),
               ),
-              const SizedBox(height: 18),
-              Text(
-                'TARIFAS Y MONTOS A COBRAR',
-                style: AppTextStyles.mono(fontSize: 11, letterSpacing: 0.8),
-              ),
-              const SizedBox(height: 8),
-              for (var i = 0; i < _tariffs.length; i++)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 10,
-                    horizontal: 14,
-                  ),
-                  decoration: glassCardDecoration(radius: 14),
-                  child: Row(
-                    spacing: 12,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _tariffs[i].label,
-                              style: AppTextStyles.body(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            Text(
-                              _tariffs[i].sub,
-                              style: AppTextStyles.body(
-                                fontSize: 10.5,
-                                color: AppColors.textMute,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(
-                        width: 130,
-                        child: TextField(
-                          controller: _tariffControllers[i],
-                          keyboardType: TextInputType.number,
-                          textAlign: TextAlign.right,
-                          style: AppTextStyles.body(fontSize: 13),
-                          decoration: appFieldDecoration().copyWith(
-                            prefixText: 'Gs. ',
-                            prefixStyle: AppTextStyles.mono(fontSize: 11),
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              Text(
-                'Los nuevos montos se aplican a los próximos cobros. Cada '
-                'cambio queda registrado en Auditoría con el usuario, la '
-                'fecha y el valor anterior.',
-                style: AppTextStyles.body(
-                  fontSize: 11,
-                  color: AppColors.textMute,
+              Expanded(
+                child: _StatCard(
+                  num: '${count(PlanStatus.sinPlan)}',
+                  label: 'Sin plan',
                 ),
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    gradient: LinearGradient(
-                      colors: [AppColors.cyanAccent, AppColors.cyan],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.cyan.withValues(alpha: 0.5),
-                        blurRadius: 30,
-                      ),
-                    ],
-                  ),
-                  child: ElevatedButton(
-                    onPressed: _saveTariffs,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      padding: const EdgeInsets.symmetric(vertical: 20),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      'Guardar tarifas',
-                      style: AppTextStyles.body(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.bgPanel2,
-                      ),
-                    ),
-                  ),
+              Expanded(
+                child: _StatCard(
+                  num: '${count(PlanStatus.vencido)}',
+                  label: 'Vencidos',
+                  numColor: AppColors.amber,
                 ),
               ),
-              const SizedBox(height: 8),
             ],
           ),
-        ),
-      ),
-      bottomNavigationBar: AppBottomNav(
-        items: adminNavItems(),
-        currentIndex: 0,
+          if (pending.isNotEmpty) ...[
+            ProfileSectionTitle('Pagos por confirmar (${pending.length})'),
+            for (final p in pending)
+              _PendingCard(
+                payment: p,
+                onConfirm: () => _confirm(p),
+                onReject: () => _reject(p),
+                onOpen: () => _open(p),
+              ),
+          ],
+          const ProfileSectionTitle('Pacientes'),
+          FilterChips(
+            options: _planFilters,
+            selected: _filter,
+            onChanged: (chip) => setState(() => _filter = chip),
+          ),
+          const SizedBox(height: 14),
+          if (shown.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                rows.isEmpty
+                    ? 'Todavía no hay pacientes activos.'
+                    : 'Ningún paciente con este filtro.',
+                style: AppTextStyles.body(
+                  fontSize: 12,
+                  color: AppColors.textMute,
+                ),
+              ),
+            ),
+          for (final row in shown)
+            _PlanCard(
+              row: row,
+              tariffs: tariffs,
+              onAction: (action) => _onAction(row, action),
+            ),
+          Text(
+            'La fecha de pago es la que ven el paciente y su cuidador en '
+            'Facturación como “Próximo pago”. Al registrar o confirmar un '
+            'pago, la fecha avanza un mes.',
+            style: AppTextStyles.body(fontSize: 11, color: AppColors.textMute),
+          ),
+          if (_payments!.isNotEmpty) ...[
+            const ProfileSectionTitle('Últimos pagos'),
+            for (final p in _payments!.take(8))
+              PaymentTile(payment: p, showPatient: true, onTap: () => _open(p)),
+          ],
+          const SizedBox(height: 18),
+          Text(
+            'TARIFAS Y MONTOS A COBRAR',
+            style: AppTextStyles.mono(fontSize: 11, letterSpacing: 0.8),
+          ),
+          const SizedBox(height: 8),
+          for (final tariff in Tariff.values)
+            _TariffField(
+              tariff: tariff,
+              controller: _tariffControllers[tariff]!,
+            ),
+          Text(
+            'Los nuevos montos se aplican a los próximos cobros. Cada cambio '
+            'queda registrado en Auditoría con el usuario, la fecha y el '
+            'valor anterior.',
+            style: AppTextStyles.body(fontSize: 11, color: AppColors.textMute),
+          ),
+          const SizedBox(height: 16),
+          ListenableBuilder(
+            listenable: Listenable.merge(_tariffControllers.values.toList()),
+            builder: (context, _) => GradientButton(
+              label: _savingTariffs ? 'Guardando…' : 'Guardar tarifas',
+              onPressed: _tariffsChanged && !_savingTariffs
+                  ? _saveTariffs
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
   }
 }
 
-class _PlanDeviceCard extends StatelessWidget {
-  const _PlanDeviceCard({required this.device, required this.onAction});
+/// Pide el motivo para rechazar un pago. `null` si se cancela.
+Future<String?> _askReason(BuildContext context) =>
+    showDialog<String>(context: context, builder: (_) => const _ReasonDialog());
 
-  final _PlanDevice device;
+class _ReasonDialog extends StatefulWidget {
+  const _ReasonDialog();
+
+  @override
+  State<_ReasonDialog> createState() => _ReasonDialogState();
+}
+
+class _ReasonDialogState extends State<_ReasonDialog> {
+  // Es del diálogo: así sigue vivo mientras se cierra con la animación.
+  final _reason = TextEditingController();
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    backgroundColor: AppColors.bgPanel,
+    shape: appDialogShape(),
+    title: Text(
+      '¿Rechazar el pago?',
+      style: AppTextStyles.display(fontSize: 14.5, fontWeight: FontWeight.w600),
+    ),
+    content: TextField(
+      controller: _reason,
+      autofocus: true,
+      maxLines: 2,
+      style: AppTextStyles.body(fontSize: 13),
+      decoration: appFieldDecoration(
+        hintText: 'Motivo (por ejemplo: no llegó la transferencia)',
+      ),
+    ),
+    actionsOverflowDirection: VerticalDirection.down,
+    actions: [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: OutlineActionButton(
+          label: 'Rechazar pago',
+          danger: true,
+          onPressed: () {
+            final text = _reason.text.trim();
+            Navigator.pop(context, text.isEmpty ? 'Sin motivo indicado' : text);
+          },
+        ),
+      ),
+      GhostButton('Cancelar', onPressed: () => Navigator.pop(context)),
+    ],
+  );
+}
+
+class _PendingCard extends StatelessWidget {
+  const _PendingCard({
+    required this.payment,
+    required this.onConfirm,
+    required this.onReject,
+    required this.onOpen,
+  });
+
+  final Payment payment;
+  final VoidCallback onConfirm;
+  final VoidCallback onReject;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = payment;
+    final muted = AppTextStyles.body(fontSize: 11, color: AppColors.textMute);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+      decoration: BoxDecoration(
+        color: AppColors.amber.withValues(alpha: 0.06),
+        border: Border.all(color: AppColors.amber.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 5,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 8,
+            children: [
+              Flexible(
+                child: Text(
+                  '${p.concepto.label} · ${p.nombrePaciente}',
+                  style: AppTextStyles.body(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                formatGs(p.monto),
+                style: AppTextStyles.mono(
+                  fontSize: 12.5,
+                  color: AppColors.text,
+                ),
+              ),
+            ],
+          ),
+          Text(
+            [
+              p.metodo.label,
+              if (p.referencia.isNotEmpty) 'Ref. ${p.referencia}',
+              if (p.fecha != null) formatEventTime(p.fecha!),
+            ].join(' · '),
+            style: muted,
+          ),
+          if (p.nombrePagador.isNotEmpty)
+            Text('Informado por ${p.nombrePagador}', style: muted),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ActionButton('Confirmar pago', onPressed: onConfirm),
+              _ActionButton('Rechazar', onPressed: onReject, danger: true),
+              TextButton(
+                onPressed: onOpen,
+                child: Text(
+                  'Ver',
+                  style: AppTextStyles.body(
+                    fontSize: 12,
+                    color: AppColors.cyan,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton(
+    this.label, {
+    required this.onPressed,
+    this.danger = false,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? AppColors.coral : AppColors.cyan;
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(color: danger ? color.withValues(alpha: 0.6) : color),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: Text(label, style: AppTextStyles.body(fontSize: 12, color: color)),
+    );
+  }
+}
+
+class _PlanCard extends StatelessWidget {
+  const _PlanCard({
+    required this.row,
+    required this.tariffs,
+    required this.onAction,
+  });
+
+  final _PlanRow row;
+  final Tariffs tariffs;
   final ValueChanged<String> onAction;
 
   @override
   Widget build(BuildContext context) {
-    final (badgeText, badgeTone) = switch (device.state) {
-      _PlanState.premium => ('Premium', StatusBadgeTone.violet),
-      _PlanState.none => ('Sin plan', StatusBadgeTone.mute),
-      _PlanState.expired => ('Premium vencido', StatusBadgeTone.warn),
-    };
-    final late = device.state == _PlanState.expired;
+    final plan = row.plan;
+    final status = plan.status;
+    final due = plan.proximoPago;
+    final late = status == PlanStatus.vencido;
     final muted = AppTextStyles.body(fontSize: 11, color: AppColors.textMute);
+    final monthly = tariffs.amountFor(PaymentConcept.premium, plan.segmento);
+    final (badgeTone, detail) = switch (status) {
+      PlanStatus.premium => (
+        StatusBadgeTone.violet,
+        '${formatGs(monthly)}/mes · '
+            '${plan.cancelado ? 'no renueva' : 'vence ${formatShortDate(due!)}'}',
+      ),
+      PlanStatus.vencido => (
+        StatusBadgeTone.warn,
+        'Venció el ${formatShortDate(due!)} · funciones Premium '
+            'deshabilitadas',
+      ),
+      PlanStatus.sinPlan => (
+        StatusBadgeTone.mute,
+        'Soporte por incidente '
+            '${formatGs(tariffs.amountFor(PaymentConcept.soporte, plan.segmento))}',
+      ),
+    };
+    final actions = [
+      ...switch (status) {
+        PlanStatus.premium => ['Registrar pago', 'Dar de baja'],
+        PlanStatus.vencido => ['Registrar pago y reactivar', 'Dar de baja'],
+        PlanStatus.sinPlan => ['Activar Premium'],
+      },
+      plan.segmento == Segment.b2c ? 'Pasar a B2B' : 'Pasar a B2C',
+    ];
+    final devices = row.devices;
+    final active = devices.any((d) => d.activo);
 
     return Container(
       width: double.infinity,
@@ -377,7 +656,7 @@ class _PlanDeviceCard extends StatelessWidget {
         children: [
           Icon(
             Icons.memory,
-            color: device.active ? AppColors.cyan : AppColors.textMute,
+            color: active ? AppColors.cyan : AppColors.textMute,
             size: 18,
           ),
           Expanded(
@@ -387,10 +666,12 @@ class _PlanDeviceCard extends StatelessWidget {
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: 8,
                   children: [
                     Expanded(
                       child: Text(
-                        device.name,
+                        row.user.fullName,
                         style: AppTextStyles.body(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
@@ -398,107 +679,104 @@ class _PlanDeviceCard extends StatelessWidget {
                       ),
                     ),
                     StatusBadge(
-                      text: device.active ? 'Activo' : 'Inactivo',
-                      tone: device.active
-                          ? StatusBadgeTone.ok
-                          : StatusBadgeTone.warn,
+                      text: plan.segmento.id,
+                      tone: StatusBadgeTone.mute,
                     ),
                   ],
                 ),
-                Text('${device.owner} · ${device.segment}', style: muted),
+                Text(
+                  devices.isEmpty
+                      ? 'Sin dispositivo asignado'
+                      : devices.map((d) => d.title).join(', '),
+                  style: muted,
+                ),
                 Wrap(
                   spacing: 8,
                   runSpacing: 4,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    StatusBadge(text: badgeText, tone: badgeTone),
-                    Text(device.planDetail, style: muted),
+                    StatusBadge(text: status.label, tone: badgeTone),
+                    Text(detail, style: muted),
                   ],
                 ),
-                Text(
-                  device.dateLabel.toUpperCase(),
-                  style: AppTextStyles.mono(
-                    fontSize: 9.5,
-                    color: late ? AppColors.amber : AppColors.textMute,
-                  ),
-                ),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 10,
-                    horizontal: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: late
-                          ? AppColors.amber.withValues(alpha: 0.5)
-                          : AppColors.line,
+                if (due != null && status != PlanStatus.sinPlan) ...[
+                  Text(
+                    (late ? 'Debía pagar' : 'Próximo pago').toUpperCase(),
+                    style: AppTextStyles.mono(
+                      fontSize: 9.5,
+                      color: late ? AppColors.amber : AppColors.textMute,
                     ),
-                    borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Row(
-                    spacing: 8,
-                    children: [
-                      Icon(
-                        Icons.calendar_today_outlined,
-                        size: 14,
-                        color: late ? AppColors.amber : AppColors.cyan,
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 10,
+                      horizontal: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: late
+                            ? AppColors.amber.withValues(alpha: 0.5)
+                            : AppColors.line,
                       ),
-                      Text(
-                        device.date,
-                        style: AppTextStyles.body(fontSize: 12.5),
-                      ),
-                    ],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      spacing: 8,
+                      children: [
+                        Icon(
+                          Icons.calendar_today_outlined,
+                          size: 14,
+                          color: late ? AppColors.amber : AppColors.cyan,
+                        ),
+                        Text(
+                          formatLongDate(due),
+                          style: AppTextStyles.body(fontSize: 12.5),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    for (final action in device.actions)
-                      OutlinedButton(
+                    for (final action in actions)
+                      _ActionButton(
+                        action,
                         onPressed: () => onAction(action),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(
-                            color: action == 'Dar de baja'
-                                ? AppColors.coral.withValues(alpha: 0.6)
-                                : AppColors.cyan,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          action,
-                          style: AppTextStyles.body(
-                            fontSize: 12,
-                            color: action == 'Dar de baja'
-                                ? AppColors.coral
-                                : AppColors.cyan,
-                          ),
-                        ),
+                        danger: action == 'Dar de baja',
                       ),
                   ],
                 ),
-                Text.rich(
-                  TextSpan(
-                    text: 'Último cambio: ',
-                    children: [
-                      TextSpan(
-                        text: device.changeLabel,
-                        style: TextStyle(
-                          color: AppColors.text,
-                          fontWeight: FontWeight.w600,
+                if (plan.ultimoCambio.isNotEmpty)
+                  Text.rich(
+                    TextSpan(
+                      text: 'Último cambio: ',
+                      children: [
+                        TextSpan(
+                          text: plan.ultimoCambio,
+                          style: TextStyle(
+                            color: AppColors.text,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      TextSpan(text: ' · ${device.changeDetail}'),
-                    ],
+                        TextSpan(
+                          text: [
+                            '',
+                            if (plan.autorUltimoCambio.isNotEmpty)
+                              plan.autorUltimoCambio,
+                            if (plan.fechaUltimoCambio != null)
+                              formatShortDate(plan.fechaUltimoCambio!),
+                          ].join(' · '),
+                        ),
+                      ],
+                    ),
+                    style: AppTextStyles.body(
+                      fontSize: 10.5,
+                      color: AppColors.textMute,
+                    ),
                   ),
-                  style: AppTextStyles.body(
-                    fontSize: 10.5,
-                    color: AppColors.textMute,
-                  ),
-                ),
               ],
             ),
           ),
@@ -506,6 +784,60 @@ class _PlanDeviceCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _TariffField extends StatelessWidget {
+  const _TariffField({required this.tariff, required this.controller});
+
+  final Tariff tariff;
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+    decoration: glassCardDecoration(radius: 14),
+    child: Row(
+      spacing: 12,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tariff.label,
+                style: AppTextStyles.body(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                tariff.sub,
+                style: AppTextStyles.body(
+                  fontSize: 10.5,
+                  color: AppColors.textMute,
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: 130,
+          child: TextField(
+            controller: controller,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.right,
+            style: AppTextStyles.body(fontSize: 13),
+            decoration: appFieldDecoration().copyWith(
+              prefixText: 'Gs. ',
+              prefixStyle: AppTextStyles.mono(fontSize: 11),
+              isDense: true,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _StatCard extends StatelessWidget {

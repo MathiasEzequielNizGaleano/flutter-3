@@ -1,52 +1,26 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../navigation/nav_items.dart';
+import '../services/auth_service.dart';
+import '../services/care_service.dart';
+import '../services/records_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
-import '../widgets/screen_title.dart';
 import '../widgets/app_bottom_nav.dart';
+import '../widgets/diagnosis_card.dart';
 import '../widgets/filter_chips.dart';
 import '../widgets/gradient_button.dart';
+import '../widgets/initials_avatar.dart';
+import '../widgets/screen_title.dart';
 import '../widgets/state_views.dart';
-import '../widgets/status_badge.dart';
 import 'diagnosis_edit_screen.dart';
 
-const _diagnoses = [
-  Diagnosis(
-    patient: 'Marcos Rojas',
-    type: 'Secundario',
-    title: 'Contractura cervical crónica',
-    description:
-        'Limita el rango de movimiento lateral de cabeza usado para el '
-        'control del cursor.',
-    date: '02 ago 2023',
-    professional: 'Lic. Carlos Herrera',
-    institution: 'CDT UNIDA',
-    specialty: 'Fisioterapia',
-    lastEdit: 'María González · Hoy, 09:40',
-  ),
-  Diagnosis(
-    patient: 'Marcos Rojas',
-    type: 'Secundario',
-    title: 'Evaluación funcional actualizada — mejora en inclinación lateral',
-    date: '10 jun 2026',
-  ),
-  Diagnosis(
-    patient: 'Lucía Fernández',
-    type: 'Antecedente',
-    title: 'Cirugía de columna cervical',
-    date: '27 nov 2019',
-    current: false,
-  ),
-];
+const _all = 'Todos';
 
-const _patientFilters = [
-  'Todos',
-  'Marcos Rojas',
-  'Lucía Fernández',
-  'Juan Paredes',
-];
-
+/// Diagnósticos de los pacientes del cuidador. Solo aparecen los pacientes
+/// que le dan permiso para ver sus datos; solo carga o corrige donde tiene
+/// permiso para editarlos.
 class CaregiverDiagnosesScreen extends StatefulWidget {
   const CaregiverDiagnosesScreen({super.key});
 
@@ -56,162 +30,124 @@ class CaregiverDiagnosesScreen extends StatefulWidget {
 }
 
 class _CaregiverDiagnosesScreenState extends State<CaregiverDiagnosesScreen> {
-  String _filter = 'Todos';
+  late Stream<List<CareAssignment>> _links = _watchLinks();
+  Stream<List<Diagnosis>>? _diagnoses;
+  List<String> _watchedUids = const [];
+  String _filter = _all;
 
-  StatusBadgeTone _toneFor(String type) => switch (type) {
-    'Principal' => StatusBadgeTone.ok,
-    'Antecedente' => StatusBadgeTone.warn,
-    _ => StatusBadgeTone.violet,
-  };
+  Stream<List<CareAssignment>> _watchLinks() => CareService.instance
+      .watchForCaregiver(AuthService.instance.currentUid ?? '');
 
-  void _open(Diagnosis diagnosis, {bool isNew = false}) {
-    Navigator.push(
+  /// Vuelve a escuchar los diagnósticos solo si cambian los pacientes.
+  Stream<List<Diagnosis>> _diagnosesOf(List<String> uids) {
+    if (_diagnoses == null || !listEquals(uids, _watchedUids)) {
+      _watchedUids = uids;
+      _diagnoses = RecordsService.instance.watchDiagnosesFor(uids);
+    }
+    return _diagnoses!;
+  }
+
+  void _retry() => setState(() {
+    _links = _watchLinks();
+    _diagnoses = null;
+  });
+
+  Future<void> _open(Diagnosis diagnosis, CareAssignment link) async {
+    final message = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (context) => DiagnosisEditScreen(
+        builder: (_) => DiagnosisEditScreen(
           diagnosis: diagnosis,
+          patientName: link.nombrePaciente,
+          readOnly: !link.permisos.editarDatos,
           navItems: caregiverNavItems(),
           currentIndex: 1,
-          isNew: isNew,
+        ),
+      ),
+    );
+    if (message != null && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  Future<void> _addNew(List<CareAssignment> editable) async {
+    CareAssignment? link;
+    final selected = editable.where((l) => l.nombrePaciente == _filter);
+    if (selected.isNotEmpty) {
+      link = selected.first;
+    } else if (editable.length == 1) {
+      link = editable.single;
+    } else {
+      link = await _choosePatient(editable);
+    }
+    if (link == null || !mounted) return;
+    await _open(
+      Diagnosis(
+        idPaciente: link.idPaciente,
+        tipo: DiagnosisType.principal,
+        diagnostico: '',
+      ),
+      link,
+    );
+  }
+
+  Future<CareAssignment?> _choosePatient(List<CareAssignment> editable) {
+    return showModalBottomSheet<CareAssignment>(
+      context: context,
+      backgroundColor: AppColors.bgPanel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+              child: Text(
+                '¿A qué paciente?',
+                style: AppTextStyles.display(fontSize: 16),
+              ),
+            ),
+            for (final link in editable)
+              ListTile(
+                leading: InitialsAvatar(
+                  initialsOf(link.nombrePaciente),
+                  size: 36,
+                ),
+                title: Text(
+                  link.nombrePaciente,
+                  style: AppTextStyles.body(fontSize: 13.5),
+                ),
+                onTap: () => Navigator.pop(context, link),
+              ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
   }
 
-  void _addNew() {
-    _open(
-      Diagnosis(
-        patient: _filter == 'Todos' ? 'Marcos Rojas' : _filter,
-        type: 'Principal',
-        title: '',
-      ),
-      isNew: true,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final visible = _diagnoses.where(
-      (diagnosis) => _filter == 'Todos' || diagnosis.patient == _filter,
-    );
-
     return Scaffold(
       backgroundColor: AppColors.bgDeep,
       body: SafeArea(
-        child: AsyncBody(
-          loader: simulateFetch,
-          builder: (context) => SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ScreenTitle('Diagnósticos'),
-                const SizedBox(height: 16),
-                GradientButton(
-                  label: '+ Nuevo diagnóstico',
-                  onPressed: _addNew,
-                ),
-                const SizedBox(height: 14),
-                FilterChips(
-                  options: _patientFilters,
-                  selected: _filter,
-                  onChanged: (chip) => setState(() => _filter = chip),
-                ),
-                const SizedBox(height: 14),
-                if (visible.isEmpty)
-                  const EmptyState(
-                    title: 'Sin diagnósticos',
-                    message:
-                        'No hay diagnósticos para el paciente seleccionado.',
-                    icon: Icons.medical_information_outlined,
-                  ),
-                for (final diagnosis in visible)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 12,
-                      horizontal: 14,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.overlay,
-                      border: Border.all(color: AppColors.line),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      spacing: 6,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                diagnosis.patient,
-                                style: AppTextStyles.body(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            StatusBadge(
-                              text: diagnosis.type,
-                              tone: _toneFor(diagnosis.type),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          diagnosis.title,
-                          style: AppTextStyles.body(fontSize: 12),
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          spacing: 12,
-                          children: [
-                            Flexible(
-                              child: Text.rich(
-                                TextSpan(
-                                  text: diagnosis.type == 'Antecedente'
-                                      ? 'Fecha: '
-                                      : 'Diagnosticado: ',
-                                  children: [
-                                    TextSpan(
-                                      text: diagnosis.date,
-                                      style: TextStyle(
-                                        color: AppColors.text,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                style: AppTextStyles.body(
-                                  fontSize: 10.5,
-                                  color: AppColors.textMute,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              diagnosis.current ? 'Vigente' : 'No vigente',
-                              style: AppTextStyles.body(
-                                fontSize: 10.5,
-                                color: AppColors.textMute,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: GestureDetector(
-                            onTap: () => _open(diagnosis),
-                            child: const StatusBadge(text: '✎ Editar'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
+        child: StreamBuilder<List<CareAssignment>>(
+          stream: _links,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return ErrorView(
+                onRetry: _retry,
+                message: AuthService.describeError(snapshot.error!),
+              );
+            }
+            if (!snapshot.hasData) return const LoadingView();
+            return _buildForLinks(snapshot.data!);
+          },
         ),
       ),
       bottomNavigationBar: AppBottomNav(
@@ -220,4 +156,111 @@ class _CaregiverDiagnosesScreenState extends State<CaregiverDiagnosesScreen> {
       ),
     );
   }
+
+  Widget _buildForLinks(List<CareAssignment> links) {
+    final visible = links.where((l) => l.permisos.verDatos).toList();
+    if (visible.isEmpty) {
+      return _Frame(
+        children: [
+          EmptyState(
+            title: links.isEmpty
+                ? 'Todavía no tenés pacientes'
+                : 'Sin permiso para ver datos',
+            message: links.isEmpty
+                ? 'Cuando el administrador te asigne un paciente, vas a ver '
+                      'sus diagnósticos acá.'
+                : 'Ninguno de tus pacientes te dio permiso para ver sus '
+                      'datos. Pedíselo al administrador.',
+            icon: Icons.medical_information_outlined,
+          ),
+        ],
+      );
+    }
+    return StreamBuilder<List<Diagnosis>>(
+      stream: _diagnosesOf([for (final l in visible) l.idPaciente]),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return ErrorView(
+            onRetry: _retry,
+            message: AuthService.describeError(snapshot.error!),
+          );
+        }
+        if (!snapshot.hasData) return const LoadingView();
+        return _buildList(visible, snapshot.data!);
+      },
+    );
+  }
+
+  Widget _buildList(List<CareAssignment> links, List<Diagnosis> diagnoses) {
+    final byPatient = {for (final l in links) l.idPaciente: l};
+    final editable = links.where((l) => l.permisos.editarDatos).toList();
+    final names = [for (final l in links) l.nombrePaciente];
+    final filter = names.contains(_filter) ? _filter : _all;
+    final shown = diagnoses.where((d) {
+      if (d.anulado) return false;
+      return filter == _all ||
+          byPatient[d.idPaciente]?.nombrePaciente == filter;
+    }).toList();
+
+    return _Frame(
+      children: [
+        GradientButton(
+          label: '+ Nuevo diagnóstico',
+          onPressed: editable.isEmpty ? null : () => _addNew(editable),
+        ),
+        if (editable.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Para registrar diagnósticos necesitás el permiso "editar '
+              'datos" del paciente. Lo otorga el administrador.',
+              style: AppTextStyles.body(
+                fontSize: 11,
+                color: AppColors.textMute,
+              ),
+            ),
+          ),
+        const SizedBox(height: 14),
+        if (links.length > 1) ...[
+          FilterChips(
+            options: [_all, ...names],
+            selected: filter,
+            onChanged: (chip) => setState(() => _filter = chip),
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (shown.isEmpty)
+          const EmptyState(
+            title: 'Sin diagnósticos',
+            message: 'Todavía no hay diagnósticos registrados.',
+            icon: Icons.medical_information_outlined,
+          ),
+        for (final d in shown)
+          DiagnosisCard(
+            diagnosis: d,
+            patientName: byPatient[d.idPaciente]?.nombrePaciente,
+            onTap: () => _open(d, byPatient[d.idPaciente]!),
+          ),
+      ],
+    );
+  }
+}
+
+class _Frame extends StatelessWidget {
+  const _Frame({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ScreenTitle('Diagnósticos'),
+        const SizedBox(height: 16),
+        ...children,
+      ],
+    ),
+  );
 }

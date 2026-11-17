@@ -1,0 +1,550 @@
+rules_version = '2';
+
+// Reglas de seguridad de HeadMouse Pro.
+// La app habla directo con Firestore, así que acá se decide quién puede
+// leer o escribir cada cosa. Lo que no está permitido explícitamente,
+// queda bloqueado.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/usuarios/$(uid)).data;
+    }
+
+    // Sesión de una cuenta que no fue dada de baja. Así, una persona dada
+    // de baja con la sesión abierta deja de ver datos al instante.
+    function isActiveUser() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && profile().estado == true;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && profile().rol == 'admin'
+        && profile().estado == true;
+    }
+
+    function link(idCuidador, idPaciente) {
+      return /databases/$(database)/documents/asignaciones/$(idCuidador + '_' + idPaciente);
+    }
+
+    // El usuario actual cuida al paciente [pid] con un vínculo vigente que
+    // le da [permiso] ('puedeVerDatos', 'puedeEditarDatos', ...).
+    function caresFor(pid, permiso) {
+      return isActiveUser()
+        && exists(link(request.auth.uid, pid))
+        && get(link(request.auth.uid, pid)).data.activo == true
+        && get(link(request.auth.uid, pid)).data[permiso] == true;
+    }
+
+    // El usuario actual es paciente del cuidador [cid] (vínculo vigente).
+    function isPatientOf(cid) {
+      return isActiveUser()
+        && exists(link(cid, request.auth.uid))
+        && get(link(cid, request.auth.uid)).data.activo == true;
+    }
+
+    // Quién ve la ficha del paciente: él mismo, sus cuidadores con permiso
+    // para ver sus datos y el administrador.
+    function canViewPatient(pid) {
+      return isAdmin() || (isActiveUser() && isSelf(pid))
+        || caresFor(pid, 'puedeVerDatos');
+    }
+
+    // Quién carga datos personales, estado funcional y diagnósticos.
+    function canEditPatient(pid) {
+      return isAdmin() || caresFor(pid, 'puedeEditarDatos');
+    }
+
+    function isCaregiver() {
+      return isActiveUser() && profile().rol == 'cuidador';
+    }
+
+    // Quién cambia la configuración del HeadMouse del paciente.
+    function canConfigure(pid) {
+      return isAdmin() || (isActiveUser() && isSelf(pid))
+        || caresFor(pid, 'puedeConfigurar');
+    }
+
+    // Quién calibra el HeadMouse del paciente.
+    function canCalibrate(pid) {
+      return isAdmin() || (isActiveUser() && isSelf(pid))
+        || caresFor(pid, 'puedeCalibrar');
+    }
+
+    // Quién ve el historial del HeadMouse: quien ve la ficha o quien lo
+    // configura o calibra.
+    function canViewDevice(pid) {
+      return canViewPatient(pid) || canConfigure(pid) || canCalibrate(pid);
+    }
+
+    // Vínculo vigente con el paciente [pid], con cualquier permiso.
+    function isLinked(pid) {
+      return isActiveUser()
+        && exists(link(request.auth.uid, pid))
+        && get(link(request.auth.uid, pid)).data.activo == true;
+    }
+
+    // Quién ve la facturación del paciente y paga: él mismo o un cuidador
+    // vinculado.
+    function canPay(pid) {
+      return (isActiveUser() && isSelf(pid) && profile().rol == 'paciente')
+        || isLinked(pid);
+    }
+
+    function planDoc(pid) {
+      return /databases/$(database)/documents/planes/$(pid);
+    }
+
+    function tariffsDoc() {
+      return /databases/$(database)/documents/tarifas/actual;
+    }
+
+    // USUARIO: perfil y rol de cada cuenta.
+    match /usuarios/{uid} {
+      // El cuidador ve la cuenta de su paciente (documento y último
+      // ingreso) si tiene permiso para ver sus datos.
+      allow read: if isSelf(uid) || isAdmin() || caresFor(uid, 'puedeVerDatos');
+
+      // Al registrarse solo se puede ser paciente o cuidador. El
+      // administrador puede dar de alta cualquier rol desde la app.
+      allow create: if (isSelf(uid)
+          && request.resource.data.rol in ['paciente', 'cuidador']
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.estado == true)
+        || (isAdmin()
+          && request.resource.data.rol in ['paciente', 'cuidador', 'admin']
+          && request.resource.data.estado == true)
+        // El cuidador registra a un paciente nuevo, siempre junto con su
+        // vínculo en la misma operación (ver asignaciones).
+        || (isCaregiver()
+          && request.resource.data.rol == 'paciente'
+          && request.resource.data.estado == true
+          && request.resource.data.creadoPor == request.auth.uid
+          && existsAfter(link(request.auth.uid, uid)));
+
+      // Cada uno edita sus datos, pero no su rol, estado ni correo.
+      // El administrador cambia los de los demás (bajas y roles), pero no
+      // los suyos: así nunca se queda sin acceso por error.
+      allow update: if (isAdmin()
+          && !isSelf(uid)
+          && request.resource.data.rol in ['paciente', 'cuidador', 'admin']
+          && request.resource.data.email == resource.data.email)
+        || (isSelf(uid)
+          && !request.resource.data.diff(resource.data)
+                .affectedKeys().hasAny(['rol', 'estado', 'email']));
+
+      // Nunca se borra una cuenta: se desactiva con estado = false.
+      allow delete: if false;
+    }
+
+    // HISTORIAL_ACCESO: solo se agregan registros, nadie los modifica.
+    match /accesos/{id} {
+      // Una contraseña incorrecta no tiene sesión: se guarda solo el correo
+      // escrito, la fecha y la plataforma, para que el administrador
+      // supervise los intentos fallidos.
+      function failedLogin(d) {
+        return d.keys().hasOnly(['correo', 'tipoEvento', 'resultado',
+                                 'fechaHora', 'plataforma'])
+          && d.tipoEvento == 'login'
+          && d.resultado == 'fallido'
+          && d.correo is string && d.correo.size() <= 120
+          && d.fechaHora == request.time
+          && d.plataforma is string && d.plataforma.size() <= 20;
+      }
+
+      allow create: if (signedIn()
+          && request.resource.data.idUsuario == request.auth.uid)
+        || (!signedIn() && failedLogin(request.resource.data));
+      // Cada uno ve los suyos; el cuidador, los de su paciente si puede
+      // ver sus datos.
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.idUsuario == request.auth.uid)
+        || caresFor(resource.data.idUsuario, 'puedeVerDatos');
+      allow update, delete: if false;
+    }
+
+    // CUIDADOR_PACIENTE: id = {idCuidador}_{idPaciente}. Nunca se borra;
+    // se termina con activo = false.
+    match /asignaciones/{id} {
+      function valid(data) {
+        return id == data.idCuidador + '_' + data.idPaciente
+          && data.tipoResponsabilidad in ['principal', 'secundario', 'temporal']
+          && data.activo is bool
+          && data.puedeVerDatos is bool
+          && data.puedeEditarDatos is bool
+          && data.puedeConfigurar is bool
+          && data.puedeCalibrar is bool;
+      }
+
+      // Cada uno ve solo los vínculos donde participa.
+      allow read: if isAdmin()
+        || (isActiveUser()
+            && (resource.data.idCuidador == request.auth.uid
+                || resource.data.idPaciente == request.auth.uid));
+
+      // El administrador vincula a un cuidador con un paciente. El cuidador
+      // solo se vincula con el paciente que está registrando en esta misma
+      // operación: no puede sumarse a pacientes que ya existían.
+      allow create: if (isAdmin()
+          && valid(request.resource.data)
+          && userDoc(request.resource.data.idCuidador).rol == 'cuidador'
+          && userDoc(request.resource.data.idPaciente).rol == 'paciente')
+        || (isCaregiver()
+          && valid(request.resource.data)
+          && request.resource.data.idCuidador == request.auth.uid
+          && request.resource.data.activo == true
+          && !exists(/databases/$(database)/documents/usuarios/$(request.resource.data.idPaciente))
+          && getAfter(/databases/$(database)/documents/usuarios/$(request.resource.data.idPaciente)).data.rol == 'paciente'
+          && getAfter(/databases/$(database)/documents/usuarios/$(request.resource.data.idPaciente)).data.creadoPor == request.auth.uid);
+
+      // El administrador edita, termina o reactiva. El paciente solo puede
+      // quitarle el acceso a un cuidador (no dárselo ni cambiar permisos).
+      allow update: if (isAdmin()
+          && valid(request.resource.data)
+          && request.resource.data.idCuidador == resource.data.idCuidador
+          && request.resource.data.idPaciente == resource.data.idPaciente)
+        || (isActiveUser()
+          && resource.data.idPaciente == request.auth.uid
+          && resource.data.activo == true
+          && request.resource.data.activo == false
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['activo', 'fechaFin', 'finalizadoPor']));
+
+      allow delete: if false;
+    }
+
+    // PACIENTE: id = uid del paciente. Datos personales y estado funcional.
+    match /pacientes/{pid} {
+      // Lo único que el paciente cambia de su propia ficha.
+      function selfEditable() {
+        return ['telefono', 'direccion', 'contactoEmergencia',
+                'telefonoEmergencia', 'fechaActualizacion', 'actualizadoPor'];
+      }
+
+      function isPatientSelf() {
+        return isActiveUser() && isSelf(pid) && profile().rol == 'paciente';
+      }
+
+      allow read: if canViewPatient(pid);
+      allow create: if canEditPatient(pid)
+        || (isPatientSelf()
+            && request.resource.data.keys().hasOnly(selfEditable()));
+      allow update: if canEditPatient(pid)
+        || (isPatientSelf()
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(selfEditable()));
+      allow delete: if false;
+
+      // HISTORIAL_DIAGNOSTICO: el cuidador con permiso de edición registra
+      // y corrige; el paciente solo consulta. Nunca se borra: se anula con
+      // estado = false, y un diagnóstico anulado ya no se modifica.
+      match /diagnosticos/{did} {
+        function validDiagnosis(d) {
+          return d.idPaciente == pid
+            && d.tipoDiagnostico in ['principal', 'secundario', 'antecedente']
+            && d.diagnostico is string && d.diagnostico.size() > 0
+            && d.esActual is bool
+            && d.estado is bool;
+        }
+
+        allow read: if canViewPatient(pid);
+        allow create: if canEditPatient(pid)
+          && validDiagnosis(request.resource.data)
+          && request.resource.data.estado == true
+          && request.resource.data.registradoPor == request.auth.uid;
+        allow update: if canEditPatient(pid)
+          && resource.data.estado == true
+          && validDiagnosis(request.resource.data)
+          && !request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['idPaciente', 'registradoPor', 'nombreRegistrador',
+                         'rolRegistrador', 'fechaRegistro']);
+        allow delete: if false;
+
+        // Documentación de respaldo. Storage pide el plan Blaze, así que el
+        // archivo se guarda en Firestore partido en `partes` (ver
+        // attachment_service.dart). Nunca se borra: se quita con
+        // estado = false.
+        match /adjuntos/{aid} {
+          function validAttachment(d) {
+            return d.idPaciente == pid
+              && d.idDiagnostico == did
+              && d.nombre is string && d.nombre.size() > 0
+              && d.nombre.size() <= 200
+              && d.tipo in ['application/pdf', 'image/jpeg', 'image/png']
+              && d.tamano is int && d.tamano > 0 && d.tamano <= 5242880
+              && d.partes is int && d.partes >= 1 && d.partes <= 8
+              && d.estado == true
+              && d.subidoPor == request.auth.uid;
+          }
+
+          allow read: if canViewPatient(pid);
+          // Solo a diagnósticos sin anular.
+          allow create: if canEditPatient(pid)
+            && validAttachment(request.resource.data)
+            && get(/databases/$(database)/documents/pacientes/$(pid)/diagnosticos/$(did)).data.estado == true;
+          allow update: if canEditPatient(pid)
+            && resource.data.estado == true
+            && request.resource.data.estado == false
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['estado', 'quitadoPor', 'nombreQuitador',
+                           'fechaQuitado']);
+          allow delete: if false;
+
+          // Las partes se escriben solo junto con su ficha, en la misma
+          // operación y por la misma persona: después no se agregan ni se
+          // cambian.
+          match /partes/{n} {
+            function meta() {
+              return /databases/$(database)/documents/pacientes/$(pid)/diagnosticos/$(did)/adjuntos/$(aid);
+            }
+
+            allow read: if canViewPatient(pid);
+            allow create: if !exists(meta())
+              && getAfter(meta()).data.subidoPor == request.auth.uid
+              && int(n) >= 0
+              && int(n) < getAfter(meta()).data.partes
+              && request.resource.data.keys().hasOnly(['datos'])
+              && request.resource.data.datos is bytes
+              && request.resource.data.datos.size() <= 716800;
+            allow update, delete: if false;
+          }
+        }
+      }
+
+      // Evaluaciones funcionales anteriores: solo se agregan.
+      match /evaluaciones/{eid} {
+        allow read: if canViewPatient(pid);
+        allow create: if canEditPatient(pid)
+          && request.resource.data.idPaciente == pid
+          && request.resource.data.evaluadoPor == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      // CONFIGURACION_DISPOSITIVO: se agregan; de las anteriores solo cambia
+      // si siguen vigentes o pendientes. Los valores respetan los rangos
+      // del firmware.
+      match /configuraciones/{cid} {
+        function validConfig(d) {
+          return d.idPaciente == pid
+            && d.umbralMovimiento is int
+            && d.umbralMovimiento >= 3 && d.umbralMovimiento <= 6
+            && d.velocidadMax is int
+            && d.velocidadMax >= 1 && d.velocidadMax <= 20
+            && d.delayMovimiento is int
+            && d.delayMovimiento >= 7 && d.delayMovimiento <= 16
+            && d.boton1 in [1, 2, 8, 16]
+            && d.boton2 in [1, 2, 8, 16]
+            && d.vigente is bool
+            && d.pendiente is bool;
+        }
+
+        allow read: if canViewDevice(pid);
+        allow create: if canConfigure(pid)
+          && validConfig(request.resource.data)
+          && request.resource.data.configuradoPor == request.auth.uid;
+        allow update: if canConfigure(pid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['vigente', 'pendiente']);
+        allow delete: if false;
+      }
+
+      // PAGO: comprobantes. La pasarela es simulada: el pago con QR lo
+      // aprueba o rechaza la app; la transferencia y el efectivo quedan
+      // pendientes hasta que el administrador los confirma. Nunca se borran.
+      match /pagos/{payid} {
+        function validPayment(d) {
+          return d.idPaciente == pid
+            && d.concepto in ['premium', 'dispositivo', 'soporte', 'capacitacion']
+            && d.metodo in ['qr', 'transferencia', 'efectivo']
+            && d.estado in ['aprobado', 'pendiente', 'rechazado']
+            && d.segmento in ['B2C', 'B2B']
+            && d.monto is int && d.monto > 0
+            && d.registradoPor == request.auth.uid;
+        }
+
+        // El segmento es el del plan del paciente y el monto, el de la
+        // tabla de tarifas (si el administrador ya la guardó).
+        function chargedRight(d) {
+          return ((exists(planDoc(pid)) && get(planDoc(pid)).data.segmento == d.segmento)
+              || (!exists(planDoc(pid)) && d.segmento == 'B2C'))
+            && (!exists(tariffsDoc())
+              || d.monto == get(tariffsDoc()).data[d.concepto + '_' + d.segmento]);
+        }
+
+        allow read: if isAdmin() || canPay(pid);
+        allow create: if (isAdmin() && validPayment(request.resource.data))
+          || (canPay(pid)
+            && validPayment(request.resource.data)
+            && request.resource.data.idPagador == request.auth.uid
+            && request.resource.data.concepto in ['premium', 'dispositivo']
+            && ((request.resource.data.metodo == 'qr'
+                  && request.resource.data.estado in ['aprobado', 'rechazado'])
+                || (request.resource.data.metodo != 'qr'
+                  && request.resource.data.estado == 'pendiente'))
+            && chargedRight(request.resource.data));
+        // El administrador confirma o rechaza un pago pendiente.
+        allow update: if isAdmin()
+          && resource.data.estado == 'pendiente'
+          && request.resource.data.estado in ['aprobado', 'rechazado']
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['estado', 'confirmadoPor', 'nombreConfirmador',
+                         'fechaConfirmacion', 'motivoRechazo', 'periodoHasta']);
+        allow delete: if false;
+      }
+
+      // CALIBRACION: se agregan; de las anteriores solo cambia si siguen
+      // vigentes.
+      match /calibraciones/{kid} {
+        allow read: if canViewDevice(pid);
+        allow create: if canCalibrate(pid)
+          && request.resource.data.idPaciente == pid
+          && request.resource.data.idUsuario == request.auth.uid
+          && request.resource.data.tipoCalibracion in ['manual', 'automatica']
+          && request.resource.data.estadoResultado in ['exitosa', 'cancelada', 'error']
+          && request.resource.data.vigente is bool;
+        allow update: if canCalibrate(pid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['vigente']);
+        allow delete: if false;
+      }
+    }
+
+    // DISPOSITIVO: id = MAC sin ':'. El administrador registra y asigna;
+    // quien usa el equipo con su paciente solo informa conexión, batería,
+    // sensor y última calibración.
+    match /dispositivos/{did} {
+      function patientOf() {
+        return resource.data.get('idPaciente', null);
+      }
+
+      allow read: if isAdmin()
+        || (patientOf() != null && canViewDevice(patientOf()));
+      allow create: if isAdmin()
+        && request.resource.data.macBLE is string
+        && request.resource.data.activo is bool;
+      allow update: if isAdmin()
+        || (patientOf() != null
+            && (canConfigure(patientOf()) || canCalibrate(patientOf()))
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['estadoConexion', 'ultimaConexion',
+                           'bateriaPorcentaje', 'estadoSensor',
+                           'ultimaCalibracion']));
+      allow delete: if false;
+    }
+
+    // PLAN PREMIUM: id = uid del paciente. Quien paga solo lo extiende
+    // junto con un pago aprobado de Premium hecho en la misma operación (un
+    // mes como mucho), o cancela y reanuda la renovación. El administrador
+    // registra pagos, da de baja y cambia el segmento.
+    match /planes/{pid} {
+      function paidNow(d) {
+        let pago = /databases/$(database)/documents/pacientes/$(pid)/pagos/$(d.ultimoPago);
+        return d.ultimoPago is string
+          && !exists(pago)
+          && getAfter(pago).data.estado == 'aprobado'
+          && getAfter(pago).data.concepto == 'premium'
+          && getAfter(pago).data.idPagador == request.auth.uid;
+      }
+
+      function oneMonthAfter(d, since) {
+        return d.proximoPago is timestamp
+          && d.proximoPago <= since + duration.value(32, 'd');
+      }
+
+      function paidByPayer(d) {
+        return canPay(pid)
+          && d.idPaciente == pid
+          && d.estado == 'premium'
+          && d.cancelado == false
+          && paidNow(d);
+      }
+
+      allow read: if isAdmin() || canPay(pid);
+      allow create: if isAdmin()
+        || (paidByPayer(request.resource.data)
+          && request.resource.data.segmento == 'B2C'
+          && oneMonthAfter(request.resource.data, request.time));
+      allow update: if isAdmin()
+        || (paidByPayer(request.resource.data)
+          && request.resource.data.segmento == resource.data.segmento
+          && (oneMonthAfter(request.resource.data, request.time)
+            || (resource.data.estado == 'premium'
+              && oneMonthAfter(request.resource.data, resource.data.proximoPago))))
+        || (canPay(pid)
+          && resource.data.estado == 'premium'
+          && request.resource.data.cancelado is bool
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['cancelado', 'ultimoCambio', 'autorUltimoCambio',
+                         'fechaUltimoCambio']));
+      allow delete: if false;
+    }
+
+    // TARIFAS: un solo documento, `tarifas/actual`. Las ven todos; solo el
+    // administrador las cambia.
+    match /tarifas/{tid} {
+      function validTariffs(d) {
+        return d.dispositivo_B2C is int && d.dispositivo_B2C > 0
+          && d.dispositivo_B2B is int && d.dispositivo_B2B > 0
+          && d.premium_B2C is int && d.premium_B2C > 0
+          && d.premium_B2B is int && d.premium_B2B > 0
+          && d.soporte_B2C is int && d.soporte_B2C > 0
+          && d.soporte_B2B is int && d.soporte_B2B > 0
+          && d.capacitacion_B2B is int && d.capacitacion_B2B > 0;
+      }
+
+      allow read: if isActiveUser();
+      allow create, update: if isAdmin() && tid == 'actual'
+        && validTariffs(request.resource.data);
+      allow delete: if false;
+    }
+
+    // El administrador ve los pagos de todos los pacientes juntos.
+    match /{path=**}/pagos/{payid} {
+      allow read: if isAdmin();
+    }
+
+    // El administrador ve los diagnósticos de todos los pacientes juntos.
+    match /{path=**}/diagnosticos/{did} {
+      allow read: if isAdmin();
+    }
+
+    // Y las calibraciones de todos, para los reportes.
+    match /{path=**}/calibraciones/{kid} {
+      allow read: if isAdmin();
+    }
+
+    // CUIDADOR: id = uid del cuidador. Sus pacientes ven sus datos de
+    // contacto.
+    match /cuidadores/{cid} {
+      allow read: if isAdmin() || (isActiveUser() && isSelf(cid))
+        || isPatientOf(cid);
+      allow create, update: if isAdmin()
+        || (isActiveUser() && isSelf(cid) && profile().rol == 'cuidador');
+      allow delete: if false;
+    }
+
+    // AUDITORIA: quién cambió qué y cuándo. Cada uno solo puede firmar
+    // registros a su nombre; nadie los modifica ni los borra.
+    match /auditoria/{id} {
+      allow create: if signedIn()
+        && request.resource.data.idActor == request.auth.uid;
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}

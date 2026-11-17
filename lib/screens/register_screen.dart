@@ -3,18 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../l10n/app_strings.dart';
+import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
 import '../utils/validators.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/password_strength_meter.dart';
 import '../widgets/role_selector.dart';
-import '../widgets/recaptcha_placeholder.dart';
+import '../widgets/recaptcha_check.dart';
 import '../widgets/consent_checkbox.dart';
 import '../theme/app_input_decoration.dart';
-import 'caregiver_patients_screen.dart';
-import 'patient_home_screen.dart';
+import 'login_screen.dart' show homeFor;
 import 'privacy_policy_screen.dart';
 import 'terms_screen.dart';
+import 'two_factor_screen.dart';
 
 const _registerRoles = [
   RoleOption(label: 'Paciente', icon: Icons.accessibility_new),
@@ -34,6 +35,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscureConfirmPassword = true;
   bool _acceptedTerms = false;
   bool _acceptedPrivacy = false;
+  bool _notRobot = false;
 
   final _nameController = TextEditingController();
   final _lastNameController = TextEditingController();
@@ -45,7 +47,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isRegistering = false;
 
-  bool get _canSubmit => _acceptedTerms && _acceptedPrivacy;
+  bool get _canSubmit => _acceptedTerms && _acceptedPrivacy && _notRobot;
 
   @override
   void dispose() {
@@ -77,17 +79,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     setState(() => _isRegistering = true);
 
-    await Future.delayed(const Duration(seconds: 2));
+    final role = _selectedRole == 'Cuidador / tutor'
+        ? UserRole.cuidador
+        : UserRole.paciente;
+    final AppUser user;
+    try {
+      user = await AuthService.instance.register(
+        nombres: _nameController.text,
+        apellidos: _lastNameController.text,
+        email: _emailController.text,
+        documento: Validators.normalizeDocument(_documentController.text),
+        password: _passwordController.text,
+        role: role,
+      );
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isRegistering = false;
+        _notRobot = false;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
 
     if (!mounted) return;
     setState(() => _isRegistering = false);
 
-    final Widget destination = _selectedRole == 'Cuidador / tutor'
-        ? const CaregiverPatientsScreen()
-        : const PatientHomeScreen();
+    // Antes de entrar se verifica el correo con un código (simulado).
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => destination),
+      MaterialPageRoute(
+        builder: (context) =>
+            TwoFactorScreen(user: user, destination: (_) => homeFor(user.role)),
+      ),
     );
   }
 
@@ -315,7 +341,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         'datos de salud, para las finalidades descritas.',
                   ),
                   const SizedBox(height: 8),
-                  const RecaptchaPlaceholder(),
+                  RecaptchaCheck(
+                    value: _notRobot,
+                    onChanged: (value) => setState(() => _notRobot = value),
+                  ),
                   const SizedBox(height: 16),
                   Container(
                     decoration: BoxDecoration(

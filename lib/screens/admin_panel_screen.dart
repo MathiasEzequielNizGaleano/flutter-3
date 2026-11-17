@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../navigation/nav_items.dart';
+import '../services/admin_service.dart';
+import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_decorations.dart';
 import '../theme/app_text_styles.dart';
@@ -8,6 +10,9 @@ import '../widgets/screen_title.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'admin_audit_screen.dart';
 import 'admin_devices_screen.dart';
+import 'admin_plans_screen.dart';
+import 'admin_reports_screen.dart';
+import 'admin_users_screen.dart';
 
 class _AdminAction {
   const _AdminAction(this.icon, this.label, this.builder);
@@ -17,16 +22,23 @@ class _AdminAction {
   final WidgetBuilder? builder;
 }
 
-class AdminPanelScreen extends StatelessWidget {
+class AdminPanelScreen extends StatefulWidget {
   const AdminPanelScreen({super.key});
+
+  @override
+  State<AdminPanelScreen> createState() => _AdminPanelScreenState();
+}
+
+class _AdminPanelScreenState extends State<AdminPanelScreen> {
+  final _users = AdminService.instance.watchUsers();
 
   @override
   Widget build(BuildContext context) {
     final actions = [
-      const _AdminAction(
+      _AdminAction(
         Icons.people_outline,
         'Gestionar usuarios y roles',
-        null,
+        (_) => const AdminUsersScreen(),
       ),
       _AdminAction(
         Icons.shield_outlined,
@@ -43,10 +55,15 @@ class AdminPanelScreen extends StatelessWidget {
         'Estado de dispositivos',
         (_) => const AdminDevicesScreen(),
       ),
-      const _AdminAction(
+      _AdminAction(
+        Icons.payments_outlined,
+        'Planes, pagos y tarifas',
+        (_) => const AdminPlansScreen(),
+      ),
+      _AdminAction(
         Icons.insert_chart_outlined,
-        'Reportes de pacientes y calibraciones',
-        null,
+        'Reportes de pacientes, dispositivos y calibraciones',
+        (_) => const AdminReportsScreen(),
       ),
     ];
 
@@ -60,19 +77,44 @@ class AdminPanelScreen extends StatelessWidget {
             children: [
               ScreenTitle('Panel general'),
               const SizedBox(height: 18),
-              Row(
-                spacing: 10,
-                children: const [
-                  Expanded(
-                    child: _StatCard(num: '128', label: 'Usuarios'),
-                  ),
-                  Expanded(
-                    child: _StatCard(num: '94', label: 'Dispositivos'),
-                  ),
-                  Expanded(
-                    child: _StatCard(num: '3', label: 'Alertas'),
-                  ),
-                ],
+              StreamBuilder<List<ManagedUser>>(
+                stream: _users,
+                builder: (context, snapshot) {
+                  final users = snapshot.data;
+                  String count(bool Function(ManagedUser) test) {
+                    if (snapshot.hasError) return '—';
+                    if (users == null) return '…';
+                    return '${users.where(test).length}';
+                  }
+
+                  return Row(
+                    spacing: 10,
+                    children: [
+                      Expanded(
+                        child: _StatCard(
+                          num: count(
+                            (u) => u.active && u.role == UserRole.paciente,
+                          ),
+                          label: 'Pacientes',
+                        ),
+                      ),
+                      Expanded(
+                        child: _StatCard(
+                          num: count(
+                            (u) => u.active && u.role == UserRole.cuidador,
+                          ),
+                          label: 'Cuidadores',
+                        ),
+                      ),
+                      Expanded(
+                        child: _StatCard(
+                          num: count((u) => !u.active),
+                          label: 'De baja',
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 18),
               Text(
