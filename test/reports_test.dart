@@ -74,10 +74,9 @@ void main() {
       expect(r.connectedDevices, 0);
       expect(r.unassignedDevices, 0);
       expect(r.lowBattery, 0);
-      expect(
-        [for (final t in r.firmware) '${t.label} ${t.count}'],
-        containsAll(['1.2.0 1', 'Sin dato 1']),
-      );
+      expect([
+        for (final t in r.firmware) '${t.label} ${t.count}',
+      ], containsAll(['1.2.0 1', 'Sin dato 1']));
     });
 
     test('cuenta las calibraciones del período', () {
@@ -168,9 +167,7 @@ void main() {
       expect(find.text('Última exitosa: 12 nov 2026'), findsOneWidget);
     });
 
-    testWidgets('el período cambia las calibraciones contadas', (
-      tester,
-    ) async {
+    testWidgets('el período cambia las calibraciones contadas', (tester) async {
       await pump(tester, const AdminReportsScreen());
 
       await tester.scrollUntilVisible(

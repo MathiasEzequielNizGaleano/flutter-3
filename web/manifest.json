@@ -1,11 +1,11 @@
 {
-    "name": "headmouse_pro",
-    "short_name": "headmouse_pro",
+    "name": "HeadMouse Pro",
+    "short_name": "HeadMouse",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#020915",
     "theme_color": "#020915",
-    "description": "A new Flutter project.",
+    "description": "Gestión y configuración del mouse por movimiento de cabeza HeadMouse Pro.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

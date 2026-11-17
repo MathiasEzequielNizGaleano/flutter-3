@@ -137,7 +137,10 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         children: [
           Text(
             'Datos al ${formatEventTime(DateTime.now())}. Se actualizan solos.',
-            style: AppTextStyles.body(fontSize: 11.5, color: AppColors.textMute),
+            style: AppTextStyles.body(
+              fontSize: 11.5,
+              color: AppColors.textMute,
+            ),
           ),
           const ProfileSectionTitle('Pacientes'),
           _StatRow([
@@ -223,7 +226,8 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
               style: AppTextStyles.body(fontSize: 12, color: AppColors.text),
             ),
           ),
-          for (final p in r.byPatient) _PatientCalibrationRow(p, since: r.since),
+          for (final p in r.byPatient)
+            _PatientCalibrationRow(p, since: r.since),
         ],
       ),
     );
@@ -299,7 +303,10 @@ class _MeterList extends StatelessWidget {
         children: [
           Text(
             title,
-            style: AppTextStyles.body(fontSize: 13, fontWeight: FontWeight.w600),
+            style: AppTextStyles.body(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 10),
           if (total == 0)
@@ -407,7 +414,9 @@ class _PatientCalibrationRow extends StatelessWidget {
             ? AppColors.amber.withValues(alpha: 0.06)
             : AppColors.overlay,
         border: Border.all(
-          color: stale ? AppColors.amber.withValues(alpha: 0.4) : AppColors.line,
+          color: stale
+              ? AppColors.amber.withValues(alpha: 0.4)
+              : AppColors.line,
         ),
         borderRadius: BorderRadius.circular(12),
       ),

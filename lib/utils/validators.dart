@@ -31,7 +31,7 @@ class Validators {
   static String? optionalPhone(String? value) {
     final text = value?.trim() ?? '';
     if (text.isEmpty) return null;
-    return _phone.hasMatch(text) ? null : 'Ingresa un teléfono válido.';
+    return _phone.hasMatch(text) ? null : 'Ingresá un teléfono válido.';
   }
 
   static String? userOrEmail(String? value) {

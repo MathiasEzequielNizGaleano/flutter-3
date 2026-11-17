@@ -270,8 +270,7 @@ final _screens = <String, Widget Function()>{
     tariffs: const Tariffs(),
   ),
   'admin · reportes': () => const AdminReportsScreen(),
-  'historial de ingresos · propio': () =>
-      const AccessHistoryScreen(uid: 'p1'),
+  'historial de ingresos · propio': () => const AccessHistoryScreen(uid: 'p1'),
   'historial de ingresos · de un paciente': () =>
       const AccessHistoryScreen(uid: 'p1', name: 'Juan Paredes'),
   'adjunto · foto': () => AttachmentViewerScreen(

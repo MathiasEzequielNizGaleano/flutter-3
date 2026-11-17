@@ -249,7 +249,7 @@ void main() {
       await tester.tap(find.widgetWithText(GradientButton, 'Guardar'));
       await tester.pumpAndSettle();
       expect(
-        find.text('Ingresa el número donde vas a recibir el SMS.'),
+        find.text('Ingresá el número donde vas a recibir el SMS.'),
         findsOneWidget,
       );
       expect(service.calls, isEmpty);

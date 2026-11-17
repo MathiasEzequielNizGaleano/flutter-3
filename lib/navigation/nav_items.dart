@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../screens/admin_panel_screen.dart';
 import '../screens/admin_audit_screen.dart';
 import '../screens/admin_diagnoses_screen.dart';
+import '../screens/admin_panel_screen.dart';
 import '../screens/admin_profile_screen.dart';
 import '../screens/admin_users_screen.dart';
 import '../screens/billing_screen.dart';

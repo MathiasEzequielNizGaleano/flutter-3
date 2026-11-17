@@ -456,7 +456,7 @@ abstract class BillingService {
   /// Administrador: aprueba un pago pendiente.
   Future<void> confirmPayment(Payment payment, PremiumPlan plan);
 
-  /// Administrador: rechaza un pago pendiente (no llegó la plata).
+  /// Administrador: rechaza un pago pendiente (el dinero no se recibió).
   Future<void> rejectPayment(Payment payment, String motivo);
 
   /// Administrador: da de baja el Plan Premium.

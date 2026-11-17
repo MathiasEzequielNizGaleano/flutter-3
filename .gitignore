@@ -44,7 +44,15 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Dev files
+# Local editor and tooling settings
+.claude/
+.vscode/
+
+# Local documentation
 /docs
-# Logs del CLI de Firebase
+
+# Firebase CLI and emulators
+.firebase/
 firebase-debug.log
+firestore-debug.log
+ui-debug.log

@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:headmouse_pro/theme/app_text_styles.dart';
-import 'package:headmouse_pro/theme/app_colors.dart';
-import 'package:headmouse_pro/screens/admin_panel_screen.dart';
-import 'package:headmouse_pro/screens/caregiver_patients_screen.dart';
-import 'package:headmouse_pro/screens/patient_home_screen.dart';
-import 'package:headmouse_pro/screens/privacy_policy_screen.dart';
-import 'package:headmouse_pro/screens/terms_screen.dart';
-import 'package:headmouse_pro/widgets/terms_acceptance.dart';
-import 'package:headmouse_pro/screens/register_screen.dart';
-import 'package:headmouse_pro/services/auth_service.dart';
-import 'package:headmouse_pro/widgets/recaptcha_check.dart';
-import 'package:headmouse_pro/screens/two_factor_screen.dart';
-import 'package:headmouse_pro/theme/app_input_decoration.dart';
-import 'package:headmouse_pro/l10n/app_strings.dart';
-import 'package:headmouse_pro/utils/validators.dart';
+
+import '../l10n/app_strings.dart';
+import '../services/auth_service.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_input_decoration.dart';
+import '../theme/app_text_styles.dart';
+import '../utils/validators.dart';
+import '../widgets/recaptcha_check.dart';
+import '../widgets/terms_acceptance.dart';
+import 'admin_panel_screen.dart';
+import 'caregiver_patients_screen.dart';
+import 'patient_home_screen.dart';
+import 'privacy_policy_screen.dart';
+import 'register_screen.dart';
+import 'terms_screen.dart';
+import 'two_factor_screen.dart';
 
 /// Pantalla de inicio según el rol guardado en la cuenta (no lo elige el
 /// usuario al entrar).
@@ -53,10 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(notice),
-            duration: const Duration(seconds: 8),
-          ),
+          SnackBar(content: Text(notice), duration: const Duration(seconds: 8)),
         );
       });
     }

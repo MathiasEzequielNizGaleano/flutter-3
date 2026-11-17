@@ -160,10 +160,7 @@ void main() {
 
       expect(find.byType(LoginScreen), findsOneWidget);
       expect(find.byType(PatientProfileScreen), findsNothing);
-      expect(
-        find.text(SessionEnd.closedElsewhere.message),
-        findsOneWidget,
-      );
+      expect(find.text(SessionEnd.closedElsewhere.message), findsOneWidget);
       expect(AuthService.instance.current, isNull);
     });
 

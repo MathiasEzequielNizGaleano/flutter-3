@@ -207,7 +207,7 @@ void main() {
         ),
       );
       await tapText(tester, 'Guardar diagnóstico');
-      expect(find.text('Escribe el diagnóstico.'), findsOneWidget);
+      expect(find.text('Escribí el diagnóstico.'), findsOneWidget);
       expect(fake.calls, isEmpty);
     });
 
@@ -313,7 +313,7 @@ void main() {
         'abc',
       );
       await tapText(tester, 'Guardar');
-      expect(find.text('Ingresa un teléfono válido.'), findsOneWidget);
+      expect(find.text('Ingresá un teléfono válido.'), findsOneWidget);
       expect(fake.calls, isEmpty);
 
       await tester.enterText(

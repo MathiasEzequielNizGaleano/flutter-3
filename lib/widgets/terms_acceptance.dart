@@ -1,7 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:headmouse_pro/theme/app_colors.dart';
-import 'package:headmouse_pro/theme/app_text_styles.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_text_styles.dart';
 
 class TermsAcceptance extends StatelessWidget {
   const TermsAcceptance({

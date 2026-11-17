@@ -197,7 +197,9 @@ void main() {
     testWidgets('quitar pide confirmación y no borra', (tester) async {
       await pump(tester, d('d1'));
 
-      await tester.ensureVisible(find.byTooltip('Quitar informe_neurologia.pdf'));
+      await tester.ensureVisible(
+        find.byTooltip('Quitar informe_neurologia.pdf'),
+      );
       await tester.tap(find.byTooltip('Quitar informe_neurologia.pdf'));
       await tester.pumpAndSettle();
       expect(find.text('¿Quitar el documento?'), findsOneWidget);

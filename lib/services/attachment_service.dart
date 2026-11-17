@@ -201,8 +201,10 @@ class FirestoreAttachmentService extends AttachmentService {
     String diagnosisId,
   ) => _db.doc('pacientes/$patientUid/diagnosticos/$diagnosisId');
 
-  DocumentReference<Map<String, dynamic>> _ref(Attachment a) =>
-      _diagnosis(a.idPaciente, a.idDiagnostico).collection('adjuntos').doc(a.id);
+  DocumentReference<Map<String, dynamic>> _ref(Attachment a) => _diagnosis(
+    a.idPaciente,
+    a.idDiagnostico,
+  ).collection('adjuntos').doc(a.id);
 
   @override
   Stream<List<Attachment>> watch(Diagnosis diagnosis) {
@@ -305,9 +307,10 @@ class FirestoreAttachmentService extends AttachmentService {
         'nombreQuitador': _actorName,
         'fechaQuitado': FieldValue.serverTimestamp(),
       });
-      batch.update(_diagnosis(attachment.idPaciente, attachment.idDiagnostico), {
-        'adjuntos': FieldValue.increment(-1),
-      });
+      batch.update(
+        _diagnosis(attachment.idPaciente, attachment.idDiagnostico),
+        {'adjuntos': FieldValue.increment(-1)},
+      );
       batch.set(
         _db.collection('auditoria').doc(),
         auditRecord(

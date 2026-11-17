@@ -54,7 +54,7 @@ class _TwoFactorSettingsScreenState extends State<TwoFactorSettingsScreen> {
       return Validators.optionalPhone(value);
     }
     if (value == null || value.trim().isEmpty) {
-      return 'Ingresa el número donde vas a recibir el SMS.';
+      return 'Ingresá el número donde vas a recibir el SMS.';
     }
     return Validators.optionalPhone(value);
   }

@@ -23,10 +23,7 @@ class Tally {
 
 /// Cuenta cuántos pacientes tienen cada valor, en el orden de [values], y
 /// agrega "Sin evaluar" al final si hay alguno sin dato.
-List<Tally> tallyBy<T extends Choice>(
-  List<T> values,
-  Iterable<T?> data,
-) {
+List<Tally> tallyBy<T extends Choice>(List<T> values, Iterable<T?> data) {
   final list = data.toList();
   final missing = list.where((v) => v == null).length;
   return [
@@ -95,9 +92,7 @@ class AdminReport {
         if (u.role == UserRole.paciente && u.active) u,
     ];
     final patientIds = {for (final p in patients) p.uid};
-    final states = [
-      for (final p in patients) records[p.uid]?.estadoFuncional,
-    ];
+    final states = [for (final p in patients) records[p.uid]?.estadoFuncional];
     final withDevice = {
       for (final d in devices)
         if (d.activo && d.idPaciente != null) d.idPaciente!,
@@ -148,15 +143,15 @@ class AdminReport {
       connectedDevices: devices.where((d) => d.activo && d.conectado).length,
       lowBattery: devices
           .where(
-            (d) => d.activo && d.bateria != null && d.bateria! < lowBatteryPercent,
+            (d) =>
+                d.activo && d.bateria != null && d.bateria! < lowBatteryPercent,
           )
           .length,
       unassignedDevices: devices
           .where((d) => d.activo && d.idPaciente == null)
           .length,
-      firmware: [
-        for (final e in firmware.entries) Tally(e.key, e.value),
-      ]..sort((a, b) => b.count.compareTo(a.count)),
+      firmware: [for (final e in firmware.entries) Tally(e.key, e.value)]
+        ..sort((a, b) => b.count.compareTo(a.count)),
       days: days,
       since: since,
       calibrations: recent.length,
@@ -215,10 +210,6 @@ class AdminReport {
   int get successfulCalibrations => calibrations - failedCalibrations;
 
   /// Pacientes activos sin una calibración exitosa en el período.
-  int get uncalibratedPatients => byPatient
-      .where(
-        (p) =>
-            p.last == null || p.last!.isBefore(since),
-      )
-      .length;
+  int get uncalibratedPatients =>
+      byPatient.where((p) => p.last == null || p.last!.isBefore(since)).length;
 }

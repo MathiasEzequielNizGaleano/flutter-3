@@ -254,7 +254,7 @@ class _DiagnosisEditScreenState extends State<DiagnosisEditScreen> {
             hint: 'Diagnóstico (ej. Parálisis cerebral)',
             icon: Icons.medical_services_outlined,
             validator: (value) => (value == null || value.trim().isEmpty)
-                ? 'Escribe el diagnóstico.'
+                ? 'Escribí el diagnóstico.'
                 : null,
           ),
           AppTextField(

@@ -1,14 +1,14 @@
 // Protocolo BLE del HeadMouse Pro (ESP32-C3 SuperMini + MPU6050).
 //
-// Es un espejo del firmware ("el codigo del firmware.txt"): UUIDs y formato
-// de bytes de cada característica. Si cambia el firmware, se cambia acá y
-// nada más. Este archivo no depende del plugin de Bluetooth para poder
+// Refleja el firmware del ESP32: UUIDs y formato de bytes de cada
+// característica. Si cambia el firmware, se cambia acá y nada más. Este archivo no depende del plugin de Bluetooth para poder
 // probarlo con tests comunes.
 
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// Nombre con el que se anuncia el dispositivo (`new HeadMoxBleMouse(...)`).
+/// Nombre con el que se anuncia el dispositivo (constructor de
+/// `HeadMoxBleMouse` en el firmware).
 const headMouseAdvName = 'HeadMouse Pro';
 
 /// UUIDs del servicio personalizado para Flutter.

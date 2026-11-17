@@ -81,9 +81,9 @@ const _policySections = [
   ),
   _PolicySection(
     '9. Tus derechos',
-    'Puedes acceder a tus datos, rectificarlos o actualizarlos, solicitar su '
+    'Podés acceder a tus datos, rectificarlos o actualizarlos, solicitar su '
         'supresión, oponerte a su tratamiento en los casos previstos por la '
-        'ley y revocar tu consentimiento. Puedes editar tus datos desde '
+        'ley y revocar tu consentimiento. Podés editar tus datos desde '
         'Perfil o enviar tu solicitud al contacto indicado en esta Política.',
   ),
   _PolicySection(

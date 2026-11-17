@@ -15,7 +15,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28" />
 
     <application
-        android:label="headmouse_pro"
+        android:label="HeadMouse Pro"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

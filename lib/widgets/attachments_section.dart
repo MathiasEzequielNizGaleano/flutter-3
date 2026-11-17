@@ -352,7 +352,9 @@ class _AttachmentRow extends StatelessWidget {
               spacing: 10,
               children: [
                 Icon(
-                  isImage ? Icons.image_outlined : Icons.picture_as_pdf_outlined,
+                  isImage
+                      ? Icons.image_outlined
+                      : Icons.picture_as_pdf_outlined,
                   color: removed ? AppColors.textMute : AppColors.cyan,
                   size: 22,
                 ),
@@ -365,15 +367,16 @@ class _AttachmentRow extends StatelessWidget {
                         name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.body(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: muted,
-                        ).copyWith(
-                          decoration: removed
-                              ? TextDecoration.lineThrough
-                              : null,
-                        ),
+                        style:
+                            AppTextStyles.body(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: muted,
+                            ).copyWith(
+                              decoration: removed
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                            ),
                       ),
                       Text(
                         detail,
@@ -405,7 +408,11 @@ class _AttachmentRow extends StatelessWidget {
                   IconButton(
                     tooltip: 'Quitar $name',
                     onPressed: onRemove,
-                    icon: Icon(Icons.close, color: AppColors.textMute, size: 18),
+                    icon: Icon(
+                      Icons.close,
+                      color: AppColors.textMute,
+                      size: 18,
+                    ),
                   )
                 else
                   const SizedBox(width: 8),
@@ -417,4 +424,3 @@ class _AttachmentRow extends StatelessWidget {
     );
   }
 }
-

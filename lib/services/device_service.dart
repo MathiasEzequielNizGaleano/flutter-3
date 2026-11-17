@@ -541,12 +541,15 @@ class FirestoreDeviceService extends DeviceService {
 
   @override
   Stream<List<CalibrationEntry>> watchAllCalibrations() => _guard(
-    () => _db.collectionGroup('calibraciones').snapshots().map(
-      (snap) => [
-        for (final doc in snap.docs)
-          CalibrationEntry.fromMap(doc.id, doc.data()),
-      ]..sort((a, b) => newestFirst(a.fecha, b.fecha)),
-    ),
+    () => _db
+        .collectionGroup('calibraciones')
+        .snapshots()
+        .map(
+          (snap) => [
+            for (final doc in snap.docs)
+              CalibrationEntry.fromMap(doc.id, doc.data()),
+          ]..sort((a, b) => newestFirst(a.fecha, b.fecha)),
+        ),
   );
 
   Map<String, Object?> _configData(String pid, DeviceConfig c, String? mac) => {

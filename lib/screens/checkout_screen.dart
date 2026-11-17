@@ -189,7 +189,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 keyboardType: TextInputType.number,
                 validator: (v) => Validators.required(
                   v,
-                  'Escribe el número de operación que te dio el banco.',
+                  'Escribí el número de operación que te dio el banco.',
                 ),
               ),
               GradientButton(

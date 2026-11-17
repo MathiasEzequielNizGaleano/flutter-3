@@ -152,7 +152,7 @@ class _DeviceFormScreenState extends State<DeviceFormScreen> {
                       icon: Icons.qr_code_2,
                       capitalization: TextCapitalization.characters,
                       validator: (v) => (v == null || v.trim().isEmpty)
-                          ? 'Escribe el código del equipo.'
+                          ? 'Escribí el código del equipo.'
                           : null,
                     ),
                     if (_isNew)

@@ -186,7 +186,7 @@ void main() {
       await tap(tester, find.text('Transferencia bancaria'));
       await tap(tester, find.text('Enviar comprobante'));
       expect(
-        find.text('Escribe el número de operación que te dio el banco.'),
+        find.text('Escribí el número de operación que te dio el banco.'),
         findsOneWidget,
       );
       expect(billing.calls, isEmpty);
