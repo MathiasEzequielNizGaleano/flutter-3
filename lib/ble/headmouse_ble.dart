@@ -355,34 +355,54 @@ class HeadMouseBle extends ChangeNotifier {
     await stopScan();
 
     final device = target.device;
-    _userDisconnect = false;
     disconnectMessage = null;
-    _device = device;
     deviceName = target.name;
-    link = HeadMouseLink.connecting;
-    notifyListeners();
 
-    try {
-      await device.connect(
-        license: License.nonprofit, // proyecto educativo (tesis)
-        timeout: const Duration(seconds: 15),
-        mtu: null, // los paquetes del HeadMouse miden como mucho 8 bytes
-      );
-      _connSub = device.connectionState.listen((state) {
-        if (state == BluetoothConnectionState.disconnected) {
-          _handleDisconnected();
-        }
-      });
-      await _setupGatt(device);
-      link = HeadMouseLink.connected;
+    for (var attempt = 1; ; attempt++) {
+      _userDisconnect = false;
+      _device = device;
+      link = HeadMouseLink.connecting;
       notifyListeners();
-    } catch (e) {
-      _userDisconnect = true;
-      await _safeDisconnect(device);
-      _handleDisconnected();
-      throw HeadMouseException(_friendly(e, whileConnecting: true));
+
+      try {
+        await _open(device);
+        link = HeadMouseLink.connected;
+        notifyListeners();
+        return;
+      } catch (e) {
+        _userDisconnect = true;
+        await _safeDisconnect(device);
+        _handleDisconnected();
+        // Android a veces corta con el error genérico 133 sin una causa
+        // concreta; un segundo intento suele funcionar.
+        if (attempt == 1 && _isAndroidGenericError(e)) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          continue;
+        }
+        throw HeadMouseException(_friendly(e, whileConnecting: true));
+      }
     }
   }
+
+  Future<void> _open(BluetoothDevice device) async {
+    await device.connect(
+      license: License.nonprofit, // proyecto educativo (tesis)
+      timeout: const Duration(seconds: 15),
+      mtu: null, // los paquetes del HeadMouse miden como mucho 8 bytes
+    );
+    _connSub = device.connectionState.listen((state) {
+      if (state == BluetoothConnectionState.disconnected) {
+        _handleDisconnected();
+      }
+    });
+    await _setupGatt(device);
+  }
+
+  /// Error 133 de Android (`ANDROID_SPECIFIC_ERROR` / `GATT_ERROR`).
+  static bool _isAndroidGenericError(Object e) =>
+      e is FlutterBluePlusException &&
+      e.platform == ErrorPlatform.android &&
+      e.code == 133;
 
   Future<void> _setupGatt(BluetoothDevice device) async {
     var service = _configService(await device.discoverServices());
@@ -671,6 +691,11 @@ class HeadMouseBle extends ChangeNotifier {
           ? 'El HeadMouse no respondió. Verificá que esté encendido y que no '
                 'esté conectado a la computadora.'
           : 'El HeadMouse no respondió a tiempo.';
+    }
+    if (_isAndroidGenericError(e)) {
+      return 'No se pudo conectar con el HeadMouse. Apagá y prendé el '
+          'Bluetooth del teléfono y probá de nuevo. Si sigue fallando, '
+          'olvidá el HeadMouse Pro en Ajustes > Bluetooth y volvé a buscarlo.';
     }
     final text = e is FlutterBluePlusException
         ? (e.description ?? e.toString())
