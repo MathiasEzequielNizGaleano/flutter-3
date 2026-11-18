@@ -426,11 +426,15 @@ class HeadMouseBle extends ChangeNotifier {
     for (final c in service.characteristics) {
       _chars[c.characteristicUuid.str128.toLowerCase()] = c;
     }
-    final missing = _requiredUuids.where((u) => !_chars.containsKey(u));
+    final missing = _requiredUuids
+        .where((u) => !_chars.containsKey(u))
+        .toList();
     if (missing.isNotEmpty) {
       throw HeadMouseException(
         'El firmware no expone todas las características esperadas '
-        '(${missing.length} faltantes). ¿La versión del firmware coincide?',
+        '(${missing.length} faltantes). ¿La versión del firmware coincide?\n'
+        'Faltan: ${missing.join(', ')}\n'
+        'Recibidas: ${_chars.keys.join(', ')}',
       );
     }
 
